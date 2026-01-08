@@ -92,7 +92,7 @@ private:
 	void createSwapChain();
 	void createCommandBuffers();
 	void destroyCommandBuffers();
-	std::string shaderDir = "glsl";
+	std::string shaderDir = "samples";
 protected:
 	// Opt-in modern defaults (can be disabled by derived samples)
 	// - dynamicRendering: uses vkCmdBeginRendering instead of render pass / framebuffer

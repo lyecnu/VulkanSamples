@@ -3,6 +3,16 @@
 class VulkanExample : public VulkanExampleBase
 {
 public:
+	struct Vertex
+	{
+		float position[3];
+		float color[3];
+	};
+
+	vks::Buffer vertexBuffer;
+	vks::Buffer indexBuffer;
+	uint32_t indexCount{ 0 };
+
 	struct UniformData
 	{
 		glm::mat4 projection;
@@ -11,7 +21,9 @@ public:
 	} uniformData;
 	std::array<vks::Buffer, maxConcurrentFrames> uniformBuffers;
 
+	VkPipeline pipeline{ VK_NULL_HANDLE };
 	VkPipelineLayout pipelineLayout{ VK_NULL_HANDLE };
+
 	VkDescriptorSetLayout descriptorSetLayout{ VK_NULL_HANDLE };
 	std::array<VkDescriptorSet, maxConcurrentFrames> descriptorSets;
 
@@ -24,6 +36,35 @@ public:
 	~VulkanExample()
 	{
 
+	}
+
+	void prepareVertexBuffer()
+	{
+		const std::vector<Vertex> vertices
+		{
+			{ {  1.0f,  1.0f, 0.0f }, { 1.0f, 0.0f, 0.0f } },
+			{ { -1.0f,  1.0f, 0.0f }, { 0.0f, 1.0f, 0.0f } },
+			{ {  0.0f, -1.0f, 0.0f }, { 0.0f, 0.0f, 1.0f } }
+		};
+		VkDeviceSize vertexBufferSize = sizeof(Vertex) * vertices.size();
+
+		//std::vector<uint32_t> indices{ 0, 1, 2 };
+		//indexCount = static_cast<uint32_t>(indices.size());
+		//VkDeviceSize indexBufferSize = sizeof(indices[0]) * indices.size();
+
+		//vks::Buffer vertexStagingBuffer;
+		//VK_CHECK_RESULT(vulkanDevice->createBuffer(VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &vertexStagingBuffer, vertexBufferSize));
+		//vertexStagingBuffer.copyTo((void*)vertices.data(), vertexBufferSize);
+		//VK_CHECK_RESULT(vulkanDevice->createBuffer(VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &vertexBuffer, vertexBufferSize));
+		//vulkanDevice->copyBuffer(&vertexStagingBuffer, &vertexBuffer, queue);
+		//vertexStagingBuffer.destroy();
+
+		//vks::Buffer indexStagingBuffer;
+		//VK_CHECK_RESULT(vulkanDevice->createBuffer(VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &indexStagingBuffer, indexBufferSize));
+		//indexStagingBuffer.copyTo((void*)indices.data(), indexBufferSize);
+		//VK_CHECK_RESULT(vulkanDevice->createBuffer(VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &indexBuffer, indexBufferSize));
+		//vulkanDevice->copyBuffer(&indexStagingBuffer, &indexBuffer, queue);
+		//indexStagingBuffer.destroy();
 	}
 
 	void prepareUniformBuffers()
@@ -65,12 +106,73 @@ public:
 
 	void preparePipelines()
 	{
+		VkPipelineRenderingCreateInfo pipelineRenderingCI{ VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO };
+		pipelineRenderingCI.colorAttachmentCount = 1;
+		pipelineRenderingCI.pColorAttachmentFormats = &swapChain.colorFormat;
+		pipelineRenderingCI.depthAttachmentFormat = depthFormat;
+		pipelineRenderingCI.stencilAttachmentFormat = depthFormat;
 
+		std::array<VkPipelineShaderStageCreateInfo, 2> shaderStagesCI
+		{
+			loadShader(getShadersPath() + "triangle/triangle.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
+			loadShader(getShadersPath() + "triangle/triangle.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT)
+		};
+
+		std::vector<VkVertexInputBindingDescription> vertexInputBindingDescriptions
+		{
+			vks::initializers::vertexInputBindingDescription(0, sizeof(Vertex), VK_VERTEX_INPUT_RATE_VERTEX)
+		};
+		std::vector<VkVertexInputAttributeDescription> vertexInputAttributeDescriptions
+		{
+			vks::initializers::vertexInputAttributeDescription(0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, position)),
+			vks::initializers::vertexInputAttributeDescription(0, 1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, color))
+		};
+		VkPipelineVertexInputStateCreateInfo vertexInputStateCI = vks::initializers::pipelineVertexInputStateCreateInfo(vertexInputBindingDescriptions, vertexInputAttributeDescriptions);
+
+		VkPipelineInputAssemblyStateCreateInfo inputAssemblyStateCI = vks::initializers::pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, VK_FALSE);
+
+		VkPipelineViewportStateCreateInfo viewportStateCI = vks::initializers::pipelineViewportStateCreateInfo(1, 1);
+		
+		VkPipelineRasterizationStateCreateInfo rasterizationStateCI = vks::initializers::pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_CLOCKWISE);
+
+		VkPipelineMultisampleStateCreateInfo multisampleStateCI = vks::initializers::pipelineMultisampleStateCreateInfo(VK_SAMPLE_COUNT_1_BIT);
+
+		VkPipelineDepthStencilStateCreateInfo depthStencilStateCI = vks::initializers::pipelineDepthStencilStateCreateInfo(VK_TRUE, VK_TRUE, VK_COMPARE_OP_LESS_OR_EQUAL);
+
+		VkPipelineColorBlendAttachmentState colorBlendAttachmentState = vks::initializers::pipelineColorBlendAttachmentState(0xf, VK_FALSE);
+		VkPipelineColorBlendStateCreateInfo colorBlendStateCI = vks::initializers::pipelineColorBlendStateCreateInfo(1, &colorBlendAttachmentState);
+
+		std::vector<VkDynamicState> dynamicStates =
+		{
+			VK_DYNAMIC_STATE_VIEWPORT,
+			VK_DYNAMIC_STATE_SCISSOR
+		};
+		VkPipelineDynamicStateCreateInfo dynamicStateCI = vks::initializers::pipelineDynamicStateCreateInfo(dynamicStates);
+
+		VkPipelineLayoutCreateInfo pipelineLayoutCI = vks::initializers::pipelineLayoutCreateInfo(&descriptorSetLayout);
+		VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCI, nullptr, &pipelineLayout));
+
+		VkGraphicsPipelineCreateInfo pipelineCI = vks::initializers::pipelineCreateInfo();
+		pipelineCI.pNext = &pipelineRenderingCI;
+		pipelineCI.stageCount = static_cast<uint32_t>(shaderStagesCI.size());
+		pipelineCI.pStages = shaderStagesCI.data();
+		pipelineCI.pVertexInputState = &vertexInputStateCI;
+		pipelineCI.pInputAssemblyState = &inputAssemblyStateCI;
+		pipelineCI.pViewportState = &viewportStateCI;
+		pipelineCI.pRasterizationState = &rasterizationStateCI;
+		pipelineCI.pMultisampleState = &multisampleStateCI;
+		pipelineCI.pDepthStencilState = &depthStencilStateCI;
+		pipelineCI.pColorBlendState = &colorBlendStateCI;
+		pipelineCI.pDynamicState = &dynamicStateCI;
+		pipelineCI.layout = pipelineLayout;
+		
+		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCI, nullptr, &pipeline));
 	}
 
 	void prepare() override
 	{
 		VulkanExampleBase::prepare();
+		prepareVertexBuffer();
 		prepareUniformBuffers();
 		setupDescriptors();
 		preparePipelines();
@@ -87,7 +189,48 @@ public:
 
 	void buildCommandBuffer()
 	{
-		
+		VkCommandBuffer cmdBuffer = drawCmdBuffers[currentBuffer];
+		VkCommandBufferBeginInfo cmdBufferBeginInfo = vks::initializers::commandBufferBeginInfo();
+		VK_CHECK_RESULT(vkBeginCommandBuffer(cmdBuffer, &cmdBufferBeginInfo));
+
+		VkRenderingAttachmentInfo colorAttachment = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
+		colorAttachment.imageView = swapChain.imageViews[currentImageIndex];
+		colorAttachment.imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL;
+		colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+		colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+		colorAttachment.clearValue = { 0.2f, 0.2f, 0.2f, 0.0f };
+		VkRenderingAttachmentInfo depthStencilAttachment = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
+		depthStencilAttachment.imageView = depthStencil.view;
+		depthStencilAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+		depthStencilAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+		depthStencilAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+		depthStencilAttachment.clearValue = { 1.0f, 0.0f };
+
+		VkRenderingInfo renderingInfo{ VK_STRUCTURE_TYPE_RENDERING_INFO };
+		renderingInfo.renderArea = { 0, 0, width, height };
+		renderingInfo.layerCount = 1;
+		renderingInfo.colorAttachmentCount = 1;
+		renderingInfo.pColorAttachments = &colorAttachment;
+		renderingInfo.pDepthAttachment = &depthStencilAttachment;
+		renderingInfo.pStencilAttachment = &depthStencilAttachment;
+
+		vkCmdBeginRendering(cmdBuffer, &renderingInfo);
+
+		VkViewport viewport = vks::initializers::viewport((float)width, (float)height, 0.0f, 1.0f);
+		vkCmdSetViewport(cmdBuffer, 0, 1, &viewport);
+		VkRect2D scissor = vks::initializers::rect2D(width, height, 0, 0);
+		vkCmdSetScissor(cmdBuffer, 0, 1, &scissor);
+
+		vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentBuffer], 0, nullptr);
+		vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+
+		VkDeviceSize offsets[1] = { 0 };
+		vkCmdBindVertexBuffers(cmdBuffer, 0, 1, &vertexBuffer.buffer, offsets);
+		vkCmdDrawIndexed(cmdBuffer, indexCount, 1, 0, 0, 0);
+
+		vkCmdEndRendering(cmdBuffer);
+
+		VK_CHECK_RESULT(vkEndCommandBuffer(cmdBuffer));
 	}
 
 	void render() override
