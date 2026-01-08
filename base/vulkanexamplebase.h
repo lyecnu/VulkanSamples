@@ -94,6 +94,21 @@ private:
 	void destroyCommandBuffers();
 	std::string shaderDir = "glsl";
 protected:
+	// Opt-in modern defaults (can be disabled by derived samples)
+	// - dynamicRendering: uses vkCmdBeginRendering instead of render pass / framebuffer
+	// - synchronization2: uses vkQueueSubmit2 for submissions
+	struct ModernFeatures {
+		bool dynamicRendering = true;
+		bool synchronization2 = true;
+	} modern;
+
+	// Track swapchain/depth layouts for dynamic rendering
+	std::vector<VkImageLayout> swapchainImageLayouts;
+	VkImageLayout depthStencilLayout{ VK_IMAGE_LAYOUT_UNDEFINED };
+
+	// Device feature structs kept alive for deviceCreatepNextChain
+	VkPhysicalDeviceVulkan13Features enabledVulkan13Features{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
+
 	// Returns the path to the root of the glsl, hlsl or slang shader directory.
 	std::string getShadersPath() const;
 
@@ -214,7 +229,7 @@ public:
 
 	std::string title = "Vulkan Example";
 	std::string name = "vulkanExample";
-	uint32_t apiVersion = VK_API_VERSION_1_0;
+	uint32_t apiVersion = VK_API_VERSION_1_3;
 
 	/** @brief Default depth stencil attachment used by the default render pass */
 	struct {

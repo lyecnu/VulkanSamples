@@ -226,10 +226,13 @@ void VulkanExampleBase::prepare()
 	createCommandBuffers();
 	createSynchronizationPrimitives();
 	setupDepthStencil();
-	setupRenderPass();
 	createPipelineCache();
-	setupFrameBuffer();
-	settings.overlay = settings.overlay && (!benchmark.active);
+	if (!modern.dynamicRendering) {
+		setupRenderPass();
+		setupFrameBuffer();
+	}
+	// UI overlay currently uses a render pass based pipeline, so disable it for dynamic rendering
+	settings.overlay = settings.overlay && (!benchmark.active) && (!modern.dynamicRendering);
 	if (settings.overlay) {
 		ui.maxConcurrentFrames = maxConcurrentFrames;
 		ui.device = vulkanDevice;
@@ -718,18 +721,48 @@ void VulkanExampleBase::prepareFrame(bool waitForFence)
 void VulkanExampleBase::submitFrame(bool skipQueueSubmit)
 {
 	if (!skipQueueSubmit) {
-		const VkPipelineStageFlags waitPipelineStage{ VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
-		VkSubmitInfo submitInfo{
-			.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-			.waitSemaphoreCount = 1,
-			.pWaitSemaphores = &presentCompleteSemaphores[currentBuffer],
-			.pWaitDstStageMask = &waitPipelineStage,
-			.commandBufferCount = 1,
-			.pCommandBuffers = &drawCmdBuffers[currentBuffer],
-			.signalSemaphoreCount = 1,
-			.pSignalSemaphores = &renderCompleteSemaphores[currentImageIndex]
-		};
-		VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &submitInfo, waitFences[currentBuffer]));
+		if (modern.synchronization2) {
+			const VkSemaphoreSubmitInfo waitSemaphoreInfo{
+				.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+				.semaphore = presentCompleteSemaphores[currentBuffer],
+				.stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+				.deviceIndex = 0
+			};
+			const VkCommandBufferSubmitInfo cmdBufferInfo{
+				.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+				.commandBuffer = drawCmdBuffers[currentBuffer]
+			};
+			const VkSemaphoreSubmitInfo signalSemaphoreInfo{
+				.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+				.semaphore = renderCompleteSemaphores[currentImageIndex],
+				.stageMask = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT,
+				.deviceIndex = 0
+			};
+			const VkSubmitInfo2 submitInfo2{
+				.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+				.waitSemaphoreInfoCount = 1,
+				.pWaitSemaphoreInfos = &waitSemaphoreInfo,
+				.commandBufferInfoCount = 1,
+				.pCommandBufferInfos = &cmdBufferInfo,
+				.signalSemaphoreInfoCount = 1,
+				.pSignalSemaphoreInfos = &signalSemaphoreInfo
+			};
+			VK_CHECK_RESULT(vkQueueSubmit2(queue, 1, &submitInfo2, waitFences[currentBuffer]));
+		}
+		else {
+			const VkPipelineStageFlags waitPipelineStage{ VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
+			VkSubmitInfo submitInfo{
+				.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+				.waitSemaphoreCount = 1,
+				.pWaitSemaphores = &presentCompleteSemaphores[currentBuffer],
+				.pWaitDstStageMask = &waitPipelineStage,
+				.commandBufferCount = 1,
+				.pCommandBuffers = &drawCmdBuffers[currentBuffer],
+				.signalSemaphoreCount = 1,
+				.pSignalSemaphores = &renderCompleteSemaphores[currentImageIndex]
+			};
+			VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &submitInfo, waitFences[currentBuffer]));
+		}
 	}
 
 	VkPresentInfoKHR presentInfo{
@@ -1066,7 +1099,18 @@ bool VulkanExampleBase::initVulkan()
 
 	// Store properties (including limits), features and memory properties of the physical device (so that examples can check against them)
 	vkGetPhysicalDeviceProperties(physicalDevice, &deviceProperties);
+	// Core feature query
 	vkGetPhysicalDeviceFeatures(physicalDevice, &deviceFeatures);
+	// Vulkan 1.3 feature query (dynamic rendering & sync2 live here)
+	{
+		VkPhysicalDeviceFeatures2 features2{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+		VkPhysicalDeviceVulkan13Features features13{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
+		features2.pNext = &features13;
+		vkGetPhysicalDeviceFeatures2(physicalDevice, &features2);
+		// Enable if supported and requested
+		enabledVulkan13Features.dynamicRendering = (modern.dynamicRendering && features13.dynamicRendering);
+		enabledVulkan13Features.synchronization2 = (modern.synchronization2 && features13.synchronization2);
+	}
 	vkGetPhysicalDeviceMemoryProperties(physicalDevice, &deviceMemoryProperties);
 
 	// Derived examples can override this to set actual features (based on above readings) to enable for logical device creation
@@ -1079,6 +1123,12 @@ bool VulkanExampleBase::initVulkan()
 
 	// Derived examples can enable extensions based on the list of supported extensions read from the physical device
 	getEnabledExtensions();
+
+	// Chain Vulkan 1.3 feature struct into device create pNext
+	if (enabledVulkan13Features.dynamicRendering || enabledVulkan13Features.synchronization2) {
+		enabledVulkan13Features.pNext = deviceCreatepNextChain;
+		deviceCreatepNextChain = &enabledVulkan13Features;
+	}
 
 	result = vulkanDevice->createLogicalDevice(enabledFeatures, enabledDeviceExtensions, deviceCreatepNextChain);
 	if (result != VK_SUCCESS) {
@@ -3123,15 +3173,19 @@ void VulkanExampleBase::windowResize()
 	height = destHeight;
 	createSwapChain();
 
-	// Recreate the frame buffers
+	// Recreate depth
 	vkDestroyImageView(device, depthStencil.view, nullptr);
 	vkDestroyImage(device, depthStencil.image, nullptr);
 	vkFreeMemory(device, depthStencil.memory, nullptr);
 	setupDepthStencil();
-	for (auto& frameBuffer : frameBuffers) {
-		vkDestroyFramebuffer(device, frameBuffer, nullptr);
+
+	// Recreate render pass / frame buffers for legacy render-pass path only
+	if (!modern.dynamicRendering) {
+		for (auto& frameBuffer : frameBuffers) {
+			vkDestroyFramebuffer(device, frameBuffer, nullptr);
+		}
+		setupFrameBuffer();
 	}
-	setupFrameBuffer();
 
 	if ((width > 0.0f) && (height > 0.0f)) {
 		if (settings.overlay) {
@@ -3220,6 +3274,9 @@ void VulkanExampleBase::createSurface()
 void VulkanExampleBase::createSwapChain()
 {
 	swapChain.create(width, height, settings.vsync, settings.fullscreen);
+	// Layout tracking for dynamic rendering
+	swapchainImageLayouts.assign(swapChain.images.size(), VK_IMAGE_LAYOUT_UNDEFINED);
+	depthStencilLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 }
 
 void VulkanExampleBase::OnUpdateUIOverlay(vks::UIOverlay *overlay) {}
