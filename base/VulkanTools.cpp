@@ -1,4 +1,4 @@
-/*
+﻿/*
  * Assorted commonly used Vulkan helper functions
  *
  * Copyright (C) 2016-2024 by Sascha Willems - www.saschawillems.de
@@ -342,6 +342,34 @@ namespace vks
 				0, nullptr,
 				0, nullptr,
 				1, &imageMemoryBarrier);
+		}
+
+		void insertImageMemoryBarrier2(
+			VkCommandBuffer cmdbuffer,
+			VkImage image,
+			VkAccessFlags2 srcAccessMask,
+			VkAccessFlags2 dstAccessMask,
+			VkImageLayout oldImageLayout,
+			VkImageLayout newImageLayout,
+			VkPipelineStageFlags2 srcStageMask,
+			VkPipelineStageFlags2 dstStageMask,
+			VkImageSubresourceRange subresourceRange)
+		{
+			VkImageMemoryBarrier2 imageMemoryBarrier2 = vks::initializers::imageMemoryBarrier2();
+			imageMemoryBarrier2.srcAccessMask = srcAccessMask;
+			imageMemoryBarrier2.dstAccessMask = dstAccessMask;
+			imageMemoryBarrier2.oldLayout = oldImageLayout;
+			imageMemoryBarrier2.newLayout = newImageLayout;
+			imageMemoryBarrier2.srcStageMask = srcStageMask;
+			imageMemoryBarrier2.dstStageMask = dstStageMask;
+			imageMemoryBarrier2.image = image;
+			imageMemoryBarrier2.subresourceRange = subresourceRange;
+
+			VkDependencyInfo dependencyInfo{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+			dependencyInfo.imageMemoryBarrierCount = 1;
+			dependencyInfo.pImageMemoryBarriers = &imageMemoryBarrier2;
+
+			vkCmdPipelineBarrier2(cmdbuffer, &dependencyInfo);
 		}
 
 		void exitFatal(const std::string& message, int32_t exitCode)

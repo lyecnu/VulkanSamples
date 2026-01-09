@@ -4,7 +4,7 @@
 cmake_minimum_required(VERSION 3.10.0 FATAL_ERROR)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake")
 
-set(NAME VulkanSxamples)
+set(NAME VulkanSamples)
 
 
 project(${NAME})

@@ -1,4 +1,4 @@
-/*
+﻿/*
 * Initializers for Vulkan structures and objects used by the examples
 * Saves lot of VK_STRUCTURE_TYPE assignments
 * Some initializers are parameterized for convenience
@@ -90,6 +90,16 @@ namespace vks
 			return imageMemoryBarrier;
 		}
 
+		/** @brief Initialize an image memory barrier2 with no image transfer ownership */
+		inline VkImageMemoryBarrier2 imageMemoryBarrier2()
+		{
+			VkImageMemoryBarrier2 imageMemoryBarrier2{};
+			imageMemoryBarrier2.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+			imageMemoryBarrier2.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			imageMemoryBarrier2.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			return imageMemoryBarrier2;
+		}
+
 		/** @brief Initialize a buffer memory barrier with no image transfer ownership */
 		inline VkBufferMemoryBarrier bufferMemoryBarrier()
 		{
@@ -100,11 +110,28 @@ namespace vks
 			return bufferMemoryBarrier;
 		}
 
+		/** @brief Initialize a buffer memory barrier2 with no image transfer ownership */
+		inline VkBufferMemoryBarrier2 bufferMemoryBarrier2()
+		{
+			VkBufferMemoryBarrier2 bufferMemoryBarrier2{};
+			bufferMemoryBarrier2.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
+			bufferMemoryBarrier2.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			bufferMemoryBarrier2.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			return bufferMemoryBarrier2;
+		}
+
 		inline VkMemoryBarrier memoryBarrier()
 		{
 			VkMemoryBarrier memoryBarrier {};
 			memoryBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
 			return memoryBarrier;
+		}
+
+		inline VkMemoryBarrier2 memoryBarrier2()
+		{
+			VkMemoryBarrier2 memoryBarrier2{};
+			memoryBarrier2.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+			return memoryBarrier2;
 		}
 
 		inline VkImageCreateInfo imageCreateInfo()

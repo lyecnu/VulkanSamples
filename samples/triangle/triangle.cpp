@@ -31,15 +31,29 @@ public:
 	{
 		title = "Triangle";
 		camera.type = Camera::CameraType::lookat;
+		camera.setPosition(glm::vec3(0.0f, 0.0f, -2.5f));
+		camera.setPerspective(60.0f, (float)width / (float)height, 1.0f, 256.0f);
 	}
 
 	~VulkanExample()
 	{
-
+		if (device)
+		{
+			vkDestroyPipeline(device, pipeline, nullptr);
+			vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
+			vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
+			vertexBuffer.destroy();
+			indexBuffer.destroy();
+			for (auto& buffer : uniformBuffers)
+			{
+				buffer.destroy();
+			}
+		}
 	}
 
 	void prepareVertexBuffer()
 	{
+		//vertex
 		const std::vector<Vertex> vertices
 		{
 			{ {  1.0f,  1.0f, 0.0f }, { 1.0f, 0.0f, 0.0f } },
@@ -48,23 +62,26 @@ public:
 		};
 		VkDeviceSize vertexBufferSize = sizeof(Vertex) * vertices.size();
 
-		//std::vector<uint32_t> indices{ 0, 1, 2 };
-		//indexCount = static_cast<uint32_t>(indices.size());
-		//VkDeviceSize indexBufferSize = sizeof(indices[0]) * indices.size();
+		vks::Buffer vertexStagingBuffer;
+		VK_CHECK_RESULT(vulkanDevice->createBuffer(VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &vertexStagingBuffer, vertexBufferSize, (void*)vertices.data()));
+		VK_CHECK_RESULT(vulkanDevice->createBuffer(VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &vertexBuffer, vertexBufferSize));
+		
+		vulkanDevice->copyBuffer(&vertexStagingBuffer, &vertexBuffer, queue);
 
-		//vks::Buffer vertexStagingBuffer;
-		//VK_CHECK_RESULT(vulkanDevice->createBuffer(VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &vertexStagingBuffer, vertexBufferSize));
-		//vertexStagingBuffer.copyTo((void*)vertices.data(), vertexBufferSize);
-		//VK_CHECK_RESULT(vulkanDevice->createBuffer(VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &vertexBuffer, vertexBufferSize));
-		//vulkanDevice->copyBuffer(&vertexStagingBuffer, &vertexBuffer, queue);
-		//vertexStagingBuffer.destroy();
+		vertexStagingBuffer.destroy();
 
-		//vks::Buffer indexStagingBuffer;
-		//VK_CHECK_RESULT(vulkanDevice->createBuffer(VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &indexStagingBuffer, indexBufferSize));
-		//indexStagingBuffer.copyTo((void*)indices.data(), indexBufferSize);
-		//VK_CHECK_RESULT(vulkanDevice->createBuffer(VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &indexBuffer, indexBufferSize));
-		//vulkanDevice->copyBuffer(&indexStagingBuffer, &indexBuffer, queue);
-		//indexStagingBuffer.destroy();
+		std::vector<uint32_t> indices{ 0, 1, 2 };
+		indexCount = static_cast<uint32_t>(indices.size());
+		VkDeviceSize indexBufferSize = sizeof(indices[0]) * indices.size();
+
+		//index
+		vks::Buffer indexStagingBuffer;
+		VK_CHECK_RESULT(vulkanDevice->createBuffer(VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &indexStagingBuffer, indexBufferSize, (void*)indices.data()));
+		VK_CHECK_RESULT(vulkanDevice->createBuffer(VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &indexBuffer, indexBufferSize));
+
+		vulkanDevice->copyBuffer(&indexStagingBuffer, &indexBuffer, queue);
+
+		indexStagingBuffer.destroy();
 	}
 
 	void prepareUniformBuffers()
@@ -193,6 +210,8 @@ public:
 		VkCommandBufferBeginInfo cmdBufferBeginInfo = vks::initializers::commandBufferBeginInfo();
 		VK_CHECK_RESULT(vkBeginCommandBuffer(cmdBuffer, &cmdBufferBeginInfo));
 
+		vks::tools::insertImageMemoryBarrier2(cmdBuffer, swapChain.images[currentImageIndex], 0, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1});
+
 		VkRenderingAttachmentInfo colorAttachment = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
 		colorAttachment.imageView = swapChain.imageViews[currentImageIndex];
 		colorAttachment.imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL;
@@ -226,9 +245,13 @@ public:
 
 		VkDeviceSize offsets[1] = { 0 };
 		vkCmdBindVertexBuffers(cmdBuffer, 0, 1, &vertexBuffer.buffer, offsets);
+		vkCmdBindIndexBuffer(cmdBuffer, indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+
 		vkCmdDrawIndexed(cmdBuffer, indexCount, 1, 0, 0, 0);
 
 		vkCmdEndRendering(cmdBuffer);
+
+		vks::tools::insertImageMemoryBarrier2(cmdBuffer, swapChain.images[currentImageIndex], VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, 0, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 });
 
 		VK_CHECK_RESULT(vkEndCommandBuffer(cmdBuffer));
 	}
