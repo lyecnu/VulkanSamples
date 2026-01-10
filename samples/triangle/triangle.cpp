@@ -3,6 +3,9 @@
 class VulkanExample : public VulkanExampleBase
 {
 public:
+	bool wireframeUI = false;
+	bool wireframeState = false;
+
 	struct Vertex
 	{
 		float position[3];
@@ -48,6 +51,14 @@ public:
 			{
 				buffer.destroy();
 			}
+		}
+	}
+
+	void getEnabledFeatures() override
+	{
+		if (deviceFeatures.fillModeNonSolid)
+		{
+			enabledFeatures.fillModeNonSolid = VK_TRUE;
 		}
 	}
 
@@ -150,7 +161,8 @@ public:
 
 		VkPipelineViewportStateCreateInfo viewportStateCI = vks::initializers::pipelineViewportStateCreateInfo(1, 1);
 		
-		VkPipelineRasterizationStateCreateInfo rasterizationStateCI = vks::initializers::pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_CLOCKWISE);
+		VkPolygonMode polygonMode = wireframeState ? VK_POLYGON_MODE_LINE : VK_POLYGON_MODE_FILL;
+		VkPipelineRasterizationStateCreateInfo rasterizationStateCI = vks::initializers::pipelineRasterizationStateCreateInfo(polygonMode, VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_CLOCKWISE);
 
 		VkPipelineMultisampleStateCreateInfo multisampleStateCI = vks::initializers::pipelineMultisampleStateCreateInfo(VK_SAMPLE_COUNT_1_BIT);
 
@@ -249,6 +261,8 @@ public:
 
 		vkCmdDrawIndexed(cmdBuffer, indexCount, 1, 0, 0, 0);
 
+		drawUI(cmdBuffer);
+
 		vkCmdEndRendering(cmdBuffer);
 
 		vks::tools::insertImageMemoryBarrier2(cmdBuffer, swapChain.images[currentImageIndex], VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, 0, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 });
@@ -259,10 +273,23 @@ public:
 	void render() override
 	{
 		if (!prepared) return;
+		if (wireframeUI != wireframeState)
+		{
+			wireframeState = wireframeUI;
+			preparePipelines();
+		}
 		VulkanExampleBase::prepareFrame();
 		updateUniformBuffers();
 		buildCommandBuffer();
 		VulkanExampleBase::submitFrame();
+	}
+
+	virtual void OnUpdateUIOverlay(vks::UIOverlay* overlay)
+	{
+		if (overlay->header("Settings"))
+		{
+			overlay->checkBox("Wireframe", &wireframeUI);
+		}
 	}
 };
 

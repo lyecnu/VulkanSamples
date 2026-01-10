@@ -1,4 +1,4 @@
-
+﻿
 /*
 * UI overlay class using ImGui
 *
@@ -28,22 +28,62 @@ namespace vks
 		ImGui::CreateContext();
 		// Color scheme
 		ImGuiStyle& style = ImGui::GetStyle();
-		style.Colors[ImGuiCol_TitleBg] = ImVec4(1.0f, 0.0f, 0.0f, 1.0f);
-		style.Colors[ImGuiCol_TitleBgActive] = ImVec4(1.0f, 0.0f, 0.0f, 1.0f);
-		style.Colors[ImGuiCol_TitleBgCollapsed] = ImVec4(1.0f, 0.0f, 0.0f, 0.1f);
-		style.Colors[ImGuiCol_MenuBarBg] = ImVec4(1.0f, 0.0f, 0.0f, 0.4f);
-		style.Colors[ImGuiCol_Header] = ImVec4(0.8f, 0.0f, 0.0f, 0.4f);
-		style.Colors[ImGuiCol_HeaderActive] = ImVec4(1.0f, 0.0f, 0.0f, 0.4f);
-		style.Colors[ImGuiCol_HeaderHovered] = ImVec4(1.0f, 0.0f, 0.0f, 0.4f);
-		style.Colors[ImGuiCol_FrameBg] = ImVec4(0.0f, 0.0f, 0.0f, 0.8f);
-		style.Colors[ImGuiCol_CheckMark] = ImVec4(1.0f, 0.0f, 0.0f, 0.8f);
-		style.Colors[ImGuiCol_SliderGrab] = ImVec4(1.0f, 0.0f, 0.0f, 0.4f);
-		style.Colors[ImGuiCol_SliderGrabActive] = ImVec4(1.0f, 0.0f, 0.0f, 0.8f);
-		style.Colors[ImGuiCol_FrameBgHovered] = ImVec4(1.0f, 1.0f, 1.0f, 0.1f);
-		style.Colors[ImGuiCol_FrameBgActive] = ImVec4(1.0f, 1.0f, 1.0f, 0.2f);
-		style.Colors[ImGuiCol_Button] = ImVec4(1.0f, 0.0f, 0.0f, 0.4f);
-		style.Colors[ImGuiCol_ButtonHovered] = ImVec4(1.0f, 0.0f, 0.0f, 0.6f);
-		style.Colors[ImGuiCol_ButtonActive] = ImVec4(1.0f, 0.0f, 0.0f, 0.8f);
+
+		ImVec4 brightPurple = ImVec4(0.55f, 0.1f, 0.55f, 1.0f);
+		ImVec4 brightPurpleAlpha = ImVec4(0.55f, 0.1f, 0.55f, 0.5f);
+		ImVec4 brightPurpleLow = ImVec4(0.55f, 0.1f, 0.55f, 0.15f);
+
+		ImVec4 windowBg = ImVec4(0.13f, 0.14f, 0.16f, 1.0f);
+		ImVec4 frameBg = ImVec4(0.22f, 0.23f, 0.26f, 0.95f);
+		ImVec4 frameBgHover = ImVec4(0.32f, 0.33f, 0.36f, 0.95f);
+		ImVec4 frameBgActive = ImVec4(0.40f, 0.41f, 0.44f, 0.95f);
+
+		ImVec4 textBright = ImVec4(0.93f, 0.93f, 0.97f, 1.0f);
+
+		ImVec4 btn = ImVec4(0.65f, 0.25f, 0.60f, 0.85f);
+		ImVec4 btnHover = ImVec4(0.75f, 0.35f, 0.70f, 0.95f);
+		ImVec4 btnActive = ImVec4(0.55f, 0.15f, 0.50f, 1.0f);
+
+		ImVec4 slider = ImVec4(0.70f, 0.70f, 0.75f, 0.9f);
+		ImVec4 sliderActive = ImVec4(0.85f, 0.85f, 0.90f, 1.0f);
+
+		ImVec4 checkMark = ImVec4(0.32f, 0.85f, 0.32f, 0.95f);
+
+		ImVec4 border = ImVec4(0.32f, 0.38f, 0.42f, 0.7f);
+
+		style.Colors[ImGuiCol_TitleBg] = brightPurple;
+		style.Colors[ImGuiCol_TitleBgActive] = brightPurple;
+		style.Colors[ImGuiCol_TitleBgCollapsed] = brightPurpleLow;
+		style.Colors[ImGuiCol_MenuBarBg] = brightPurpleAlpha;
+
+		style.Colors[ImGuiCol_Header] = brightPurpleAlpha;
+		style.Colors[ImGuiCol_HeaderActive] = brightPurple;
+		style.Colors[ImGuiCol_HeaderHovered] = brightPurple;
+
+		style.Colors[ImGuiCol_FrameBg] = frameBg;
+		style.Colors[ImGuiCol_FrameBgHovered] = frameBgHover;
+		style.Colors[ImGuiCol_FrameBgActive] = frameBgActive;
+
+		style.Colors[ImGuiCol_Button] = btn;
+		style.Colors[ImGuiCol_ButtonHovered] = btnHover;
+		style.Colors[ImGuiCol_ButtonActive] = btnActive;
+
+		style.Colors[ImGuiCol_SliderGrab] = slider;
+		style.Colors[ImGuiCol_SliderGrabActive] = sliderActive;
+
+		style.Colors[ImGuiCol_CheckMark] = checkMark;
+		style.Colors[ImGuiCol_Border] = border;
+		style.Colors[ImGuiCol_BorderShadow] = ImVec4(0, 0, 0, 0.0f);
+
+		style.Colors[ImGuiCol_Text] = textBright;
+		style.Colors[ImGuiCol_WindowBg] = windowBg;
+
+		style.Colors[ImGuiCol_Separator] = brightPurpleAlpha;
+		style.Colors[ImGuiCol_SeparatorHovered] = brightPurple;
+		style.Colors[ImGuiCol_SeparatorActive] = brightPurple;
+
+		style.FrameBorderSize = 1.0f;
+
 		// Dimensions
 		ImGuiIO& io = ImGui::GetIO();
 		io.FontGlobalScale = scale;
@@ -79,7 +119,7 @@ namespace vks
 		}
 #else
 		const std::string filename = getAssetPath() + "Roboto-Medium.ttf";
-		io.Fonts->AddFontFromFileTTF(filename.c_str(), 16.0f * scale);
+		io.Fonts->AddFontFromFileTTF(filename.c_str(), 24.0f * scale);
 #endif
 		io.Fonts->GetTexDataAsRGBA32(&fontData, &texWidth, &texHeight);
 		VkDeviceSize uploadSize = texWidth*texHeight * 4 * sizeof(char);
@@ -276,6 +316,88 @@ namespace vks
 			pipelineCreateInfo.pNext = &pipelineRenderingCreateInfo;
 		}
 #endif
+		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device->logicalDevice, pipelineCache, 1, &pipelineCreateInfo, nullptr, &pipeline));
+	}
+
+	/** Prepare a separate dynamic rendering pipeline for the UI overlay rendering decoupled from the main application */
+	void UIOverlay::preparePipelineDynamic(const VkPipelineCache pipelineCache, const VkFormat colorFormat, const VkFormat depthFormat)
+	{
+		// Pipeline layout
+		VkPushConstantRange pushConstantRange{ .stageFlags = VK_SHADER_STAGE_VERTEX_BIT, .size = sizeof(PushConstBlock) };
+		VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo{
+			.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+			.setLayoutCount = 1,
+			.pSetLayouts = &descriptorSetLayout,
+			.pushConstantRangeCount = 1,
+			.pPushConstantRanges = &pushConstantRange
+		};
+		VK_CHECK_RESULT(vkCreatePipelineLayout(device->logicalDevice, &pipelineLayoutCreateInfo, nullptr, &pipelineLayout));
+
+		// Setup graphics pipeline for UI rendering
+		VkPipelineInputAssemblyStateCreateInfo inputAssemblyState = vks::initializers::pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, VK_FALSE);
+		VkPipelineRasterizationStateCreateInfo rasterizationState = vks::initializers::pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_NONE, VK_FRONT_FACE_COUNTER_CLOCKWISE);
+
+		// Enable blending
+		VkPipelineColorBlendAttachmentState blendAttachmentState{
+			.blendEnable = VK_TRUE,
+			.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA,
+			.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+			.colorBlendOp = VK_BLEND_OP_ADD,
+			.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+			.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
+			.alphaBlendOp = VK_BLEND_OP_ADD,
+			.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT
+		};
+
+		// Vertex bindings and attributes based on ImGui vertex definition
+		std::vector<VkVertexInputBindingDescription> vertexInputBindings = {
+			{.binding = 0, .stride = sizeof(ImDrawVert), .inputRate = VK_VERTEX_INPUT_RATE_VERTEX }
+		};
+		std::vector<VkVertexInputAttributeDescription> vertexInputAttributes = {
+			{.location = 0, .binding = 0, .format = VK_FORMAT_R32G32_SFLOAT, .offset = offsetof(ImDrawVert, pos) },
+			{.location = 1, .binding = 0, .format = VK_FORMAT_R32G32_SFLOAT, .offset = offsetof(ImDrawVert, uv) },
+			{.location = 2, .binding = 0, .format = VK_FORMAT_R8G8B8A8_UNORM, .offset = offsetof(ImDrawVert, col) },
+		};
+		VkPipelineVertexInputStateCreateInfo vertexInputState = vks::initializers::pipelineVertexInputStateCreateInfo();
+		vertexInputState.vertexBindingDescriptionCount = static_cast<uint32_t>(vertexInputBindings.size());
+		vertexInputState.pVertexBindingDescriptions = vertexInputBindings.data();
+		vertexInputState.vertexAttributeDescriptionCount = static_cast<uint32_t>(vertexInputAttributes.size());
+		vertexInputState.pVertexAttributeDescriptions = vertexInputAttributes.data();
+
+		VkPipelineColorBlendStateCreateInfo colorBlendState = vks::initializers::pipelineColorBlendStateCreateInfo(1, &blendAttachmentState);
+		VkPipelineDepthStencilStateCreateInfo depthStencilState = vks::initializers::pipelineDepthStencilStateCreateInfo(VK_FALSE, VK_FALSE, VK_COMPARE_OP_ALWAYS);
+		VkPipelineViewportStateCreateInfo viewportState = vks::initializers::pipelineViewportStateCreateInfo(1, 1, 0);
+		VkPipelineMultisampleStateCreateInfo multisampleState = vks::initializers::pipelineMultisampleStateCreateInfo(rasterizationSamples);
+		std::vector<VkDynamicState> dynamicStateEnables = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+		VkPipelineDynamicStateCreateInfo dynamicState = vks::initializers::pipelineDynamicStateCreateInfo(dynamicStateEnables);
+
+		// Dynamic rendering info
+		VkPipelineRenderingCreateInfo pipelineRenderingCreateInfo{
+			.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
+			.colorAttachmentCount = 1,
+			.pColorAttachmentFormats = &colorFormat,
+			.depthAttachmentFormat = depthFormat,
+			.stencilAttachmentFormat = depthFormat
+		};
+
+		VkGraphicsPipelineCreateInfo pipelineCreateInfo{
+			.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+			.pNext = &pipelineRenderingCreateInfo,
+			.stageCount = static_cast<uint32_t>(shaders.size()),
+			.pStages = shaders.data(),
+			.pVertexInputState = &vertexInputState,
+			.pInputAssemblyState = &inputAssemblyState,
+			.pViewportState = &viewportState,
+			.pRasterizationState = &rasterizationState,
+			.pMultisampleState = &multisampleState,
+			.pDepthStencilState = &depthStencilState,
+			.pColorBlendState = &colorBlendState,
+			.pDynamicState = &dynamicState,
+			.layout = pipelineLayout,
+			.renderPass = VK_NULL_HANDLE,
+			.subpass = 0,
+		};
+
 		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device->logicalDevice, pipelineCache, 1, &pipelineCreateInfo, nullptr, &pipeline));
 	}
 

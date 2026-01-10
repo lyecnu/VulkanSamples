@@ -1,4 +1,4 @@
-/*
+﻿/*
 * UI overlay class using ImGui
 *
 * Copyright (C) 2017-2025 by Sascha Willems - www.saschawillems.de
@@ -78,6 +78,7 @@ namespace vks
 		~UIOverlay();
 
 		void preparePipeline(const VkPipelineCache pipelineCache, const VkRenderPass renderPass, const VkFormat colorFormat, const VkFormat depthFormat);
+		void preparePipelineDynamic(const VkPipelineCache pipelineCache, const VkFormat colorFormat, const VkFormat depthFormat);
 		void prepareResources();
 
 		void update(uint32_t currentBuffer);

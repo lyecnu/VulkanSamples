@@ -1,4 +1,4 @@
-/*
+﻿/*
 * Vulkan Example base class
 *
 * Copyright (C) 2016-2025 by Sascha Willems - www.saschawillems.de
@@ -232,7 +232,7 @@ void VulkanExampleBase::prepare()
 		setupFrameBuffer();
 	}
 	// UI overlay currently uses a render pass based pipeline, so disable it for dynamic rendering
-	settings.overlay = settings.overlay && (!benchmark.active) && (!modern.dynamicRendering);
+	settings.overlay = settings.overlay && (!benchmark.active);
 	if (settings.overlay) {
 		ui.maxConcurrentFrames = maxConcurrentFrames;
 		ui.device = vulkanDevice;
@@ -242,7 +242,14 @@ void VulkanExampleBase::prepare()
 			loadShader(getShadersPath() + "base/uioverlay.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT),
 		};
 		ui.prepareResources();
-		ui.preparePipeline(pipelineCache, renderPass, swapChain.colorFormat, depthFormat);
+		if (!modern.dynamicRendering) {
+			// Vulkan1.0
+			ui.preparePipeline(pipelineCache, renderPass, swapChain.colorFormat, depthFormat);
+		}
+		else {
+			// Vulkan 1.3
+			ui.preparePipelineDynamic(pipelineCache, swapChain.colorFormat, depthFormat);
+		}
 	}
 }
 
@@ -659,8 +666,8 @@ void VulkanExampleBase::updateOverlay()
 	ImGui::SetNextWindowPos(ImVec2(10 * ui.scale, 10 * ui.scale));
 	ImGui::SetNextWindowSize(ImVec2(0, 0), ImGuiSetCond_FirstUseEver);
 	ImGui::Begin("Vulkan Example", nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove);
-	ImGui::TextUnformatted(title.c_str());
-	ImGui::TextUnformatted(deviceProperties.deviceName);
+	//ImGui::TextUnformatted(title.c_str());
+	//ImGui::TextUnformatted(deviceProperties.deviceName);
 	ImGui::Text("%.2f ms/frame (%.1d fps)", (1000.0f / lastFPS), lastFPS);
 #if defined(VK_USE_PLATFORM_ANDROID_KHR)
 	ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 5.0f * ui.scale));
