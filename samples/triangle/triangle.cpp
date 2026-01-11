@@ -3,8 +3,7 @@
 class VulkanExample : public VulkanExampleBase
 {
 public:
-	bool wireframeUI = false;
-	bool wireframeState = false;
+	bool enabledWireframe = false;
 
 	struct Vertex
 	{
@@ -24,7 +23,11 @@ public:
 	} uniformData;
 	std::array<vks::Buffer, maxConcurrentFrames> uniformBuffers;
 
-	VkPipeline pipeline{ VK_NULL_HANDLE };
+	struct
+	{
+		VkPipeline solid{ VK_NULL_HANDLE };
+		VkPipeline wireframe{ VK_NULL_HANDLE };
+	} pipelines;
 	VkPipelineLayout pipelineLayout{ VK_NULL_HANDLE };
 
 	VkDescriptorSetLayout descriptorSetLayout{ VK_NULL_HANDLE };
@@ -42,7 +45,11 @@ public:
 	{
 		if (device)
 		{
-			vkDestroyPipeline(device, pipeline, nullptr);
+			vkDestroyPipeline(device, pipelines.solid, nullptr);
+			if (pipelines.wireframe != VK_NULL_HANDLE)
+			{
+				vkDestroyPipeline(device, pipelines.wireframe, nullptr);
+			}
 			vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
 			vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
 			vertexBuffer.destroy();
@@ -59,6 +66,10 @@ public:
 		if (deviceFeatures.fillModeNonSolid)
 		{
 			enabledFeatures.fillModeNonSolid = VK_TRUE;
+		}
+		if (deviceFeatures.wideLines)
+		{
+			enabledFeatures.wideLines = VK_TRUE;
 		}
 	}
 
@@ -161,8 +172,7 @@ public:
 
 		VkPipelineViewportStateCreateInfo viewportStateCI = vks::initializers::pipelineViewportStateCreateInfo(1, 1);
 		
-		VkPolygonMode polygonMode = wireframeState ? VK_POLYGON_MODE_LINE : VK_POLYGON_MODE_FILL;
-		VkPipelineRasterizationStateCreateInfo rasterizationStateCI = vks::initializers::pipelineRasterizationStateCreateInfo(polygonMode, VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_CLOCKWISE);
+		VkPipelineRasterizationStateCreateInfo rasterizationStateCI = vks::initializers::pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_CLOCKWISE);
 
 		VkPipelineMultisampleStateCreateInfo multisampleStateCI = vks::initializers::pipelineMultisampleStateCreateInfo(VK_SAMPLE_COUNT_1_BIT);
 
@@ -195,7 +205,17 @@ public:
 		pipelineCI.pDynamicState = &dynamicStateCI;
 		pipelineCI.layout = pipelineLayout;
 		
-		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCI, nullptr, &pipeline));
+		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCI, nullptr, &pipelines.solid));
+
+		if (deviceFeatures.fillModeNonSolid)
+		{
+			rasterizationStateCI.polygonMode = VK_POLYGON_MODE_LINE;
+			if (deviceFeatures.wideLines)
+			{
+				rasterizationStateCI.lineWidth = 2.0f;
+			}
+			VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCI, nullptr, &pipelines.wireframe));
+		}
 	}
 
 	void prepare() override
@@ -253,7 +273,7 @@ public:
 		vkCmdSetScissor(cmdBuffer, 0, 1, &scissor);
 
 		vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentBuffer], 0, nullptr);
-		vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+		vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, enabledWireframe ? pipelines.wireframe : pipelines.solid);
 
 		VkDeviceSize offsets[1] = { 0 };
 		vkCmdBindVertexBuffers(cmdBuffer, 0, 1, &vertexBuffer.buffer, offsets);
@@ -273,11 +293,6 @@ public:
 	void render() override
 	{
 		if (!prepared) return;
-		if (wireframeUI != wireframeState)
-		{
-			wireframeState = wireframeUI;
-			preparePipelines();
-		}
 		VulkanExampleBase::prepareFrame();
 		updateUniformBuffers();
 		buildCommandBuffer();
@@ -288,7 +303,7 @@ public:
 	{
 		if (overlay->header("Settings"))
 		{
-			overlay->checkBox("Wireframe", &wireframeUI);
+			overlay->checkBox("Wireframe", &enabledWireframe);
 		}
 	}
 };
