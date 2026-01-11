@@ -579,6 +579,21 @@ namespace vks
 			return computePipelineCreateInfo;
 		}
 
+		inline VkPipelineRenderingCreateInfo pipelineRenderingCreateInfo(
+			uint32_t colorAttachmentCount,
+			const VkFormat* pColorAttachmentFormats,
+			VkFormat depthAttachmentFormat = VK_FORMAT_UNDEFINED,
+			VkFormat stencilAttachmentFormat = VK_FORMAT_UNDEFINED)
+		{
+			VkPipelineRenderingCreateInfo pipelineRenderingCreateInfo{};
+			pipelineRenderingCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+			pipelineRenderingCreateInfo.colorAttachmentCount = colorAttachmentCount;
+			pipelineRenderingCreateInfo.pColorAttachmentFormats = pColorAttachmentFormats;
+			pipelineRenderingCreateInfo.depthAttachmentFormat = depthAttachmentFormat;
+			pipelineRenderingCreateInfo.stencilAttachmentFormat = stencilAttachmentFormat;
+			return pipelineRenderingCreateInfo;
+		}
+
 		inline VkPushConstantRange pushConstantRange(
 			VkShaderStageFlags stageFlags,
 			uint32_t size,

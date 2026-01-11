@@ -82,6 +82,9 @@ endfunction(buildExamples)
 
 set(EXAMPLES
 	triangle
+	texture
+	gltfloading
+	pipelines
 )
 
 buildExamples()
