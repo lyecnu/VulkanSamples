@@ -130,11 +130,45 @@ public:
 				bufferSize = gltfImage.image.size();
 			}
 			
-			images[i].texture.fromBuffer()
+			images[i].texture.fromBuffer(buffer, bufferSize, VK_FORMAT_R8G8B8A8_UNORM, gltfImage.width, gltfImage.height, vulkanDevice, copyQueue);
+			if (deleteBuffer)
+			{
+				delete[] buffer;
+			}
 		}
 	}
 
+	void loadTextures(tinygltf::Model& input)
+	{
+		textures.resize(input.textures.size());
+		for (size_t i = 0; i < input.textures.size(); i++)
+		{
+			textures[i].imageIndex = input.textures[i].source;
+		}
+	}
 
+	void loadMaterials(tinygltf::Model& input)
+	{
+		materials.resize(input.materials.size());
+		for (size_t i = 0; i < input.materials.size(); i++)
+		{
+			tinygltf::Material& gltfMaterial = input.materials[i];
+			Material& material = materials[i];
+			if (gltfMaterial.values.find("baseColorFactor") != gltfMaterial.values.end())
+			{
+				material.baseColorFactor = glm::make_vec4(gltfMaterial.values["baseColorFactor"].ColorFactor().data());
+			}
+			if (gltfMaterial.values.find("baseColorTexture") != gltfMaterial.values.end())
+			{
+				material.baseColorTextureIndex = gltfMaterial.values["baseColorTexture"].TextureIndex();
+			}
+		}
+	}
+
+	void loadNode(tinygltf::Model& input)
+	{
+		// Implementation for loading nodes goes here
+	}
 };
 
 class VulkanExample : public VulkanExampleBase
@@ -170,8 +204,12 @@ public:
 
 		if (fileLoaded)
 		{
-			const tinygltf::Scene& scene = gltfInput.scenes[0];
-			for (size_t i = 0; i < )
+			gltfModel.loadImages(gltfInput);
+			gltfModel.loadTextures(gltfInput);
+			gltfModel.loadMaterials(gltfInput);
+
+			//const tinygltf::Scene& scene = gltfInput.scenes[0];
+			//for (size_t i = 0; i < )
 		}
 
 		size_t vertexBufferSize = vertices.size() * sizeof(VulkanglTFModel::Vertex);
