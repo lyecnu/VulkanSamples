@@ -31,7 +31,6 @@ public:
 	{
 		glm::mat4 projection;
 		glm::mat4 view;
-		glm::vec4 viewPos;
 		float lodBias = 0.0f;
 	} uniformData;
 	std::array<vks::Buffer, maxConcurrentFrames> uniformBuffers;
@@ -44,11 +43,27 @@ public:
 	VulkanExample()
 	{
 		title = "Texture loading";
+		camera.type = Camera::CameraType::lookat;
+		camera.setPosition(glm::vec3(0.0f, 0.0f, -2.5f));
+		camera.setRotation(glm::vec3(0.0f, 15.0f, 0.0f));
+		camera.setPerspective(60.0f, (float)width / (float)height, 0.1f, 256.0f);
 	}
 
 	~VulkanExample()
 	{
-
+		if (device)
+		{
+			destroyTexture(texture);
+			vkDestroyPipeline(device, pipeline, nullptr);
+			vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
+			vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
+			vertexBuffer.destroy();
+			indexBuffer.destroy();
+			for (auto& buffer : uniformBuffers)
+			{
+				buffer.destroy();
+			}
+		}
 	}
 
 	void getEnabledFeatures() override
@@ -179,7 +194,7 @@ public:
 
 		vkCmdPipelineBarrier2(copyCmd, &dependencyInfo);
 
-		texture.imageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+		texture.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
 		vulkanDevice->flushCommandBuffer(copyCmd, queue, true);
 
@@ -221,7 +236,7 @@ public:
 		VK_CHECK_RESULT(vkCreateImageView(device, &imageViewCreateInfo, nullptr, &texture.imageView));
 	}
 
-	void destroyTexture()
+	void destroyTexture(Texture texture)
 	{
 		vkDestroySampler(device, texture.sampler, nullptr);
 		vkDestroyImageView(device, texture.imageView, nullptr);
@@ -233,10 +248,10 @@ public:
 	{
 		std::vector<Vertex> vertices =
 		{
-			{ {  1.0f,  1.0f, 0.0f }, { 1.0f, 1.0f },{ 0.0f, 0.0f, 1.0f } },
-			{ { -1.0f,  1.0f, 0.0f }, { 0.0f, 1.0f },{ 0.0f, 0.0f, 1.0f } },
-			{ { -1.0f, -1.0f, 0.0f }, { 0.0f, 0.0f },{ 0.0f, 0.0f, 1.0f } },
-			{ {  1.0f, -1.0f, 0.0f }, { 1.0f, 0.0f },{ 0.0f, 0.0f, 1.0f } }
+			{ {  1.0f,  1.0f, 0.0f }, { 1.0f, 1.0f } },
+			{ { -1.0f,  1.0f, 0.0f }, { 0.0f, 1.0f } },
+			{ { -1.0f, -1.0f, 0.0f }, { 0.0f, 0.0f } },
+			{ {  1.0f, -1.0f, 0.0f }, { 1.0f, 0.0f } }
 		};
 
 		std::vector<uint32_t> indices = { 0, 1, 2, 2, 3, 0 };
@@ -283,7 +298,7 @@ public:
 		std::vector<VkDescriptorSetLayoutBinding> descriptorSetLayoutBindings =
 		{
 			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, 0),
-			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_VERTEX_BIT, 1)
+			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 1)
 		};
 		VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCI = vks::initializers::descriptorSetLayoutCreateInfo(descriptorSetLayoutBindings);
 		VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorSetLayoutCI, nullptr, &descriptorSetLayout));
@@ -327,8 +342,7 @@ public:
 		std::vector<VkVertexInputAttributeDescription> vertexInputAttributeDescriptions
 		{
 			vks::initializers::vertexInputAttributeDescription(0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, position)),
-			vks::initializers::vertexInputAttributeDescription(0, 1, VK_FORMAT_R32G32_SFLOAT, offsetof(Vertex, uv)),
-			vks::initializers::vertexInputAttributeDescription(0, 2, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, normal))
+			vks::initializers::vertexInputAttributeDescription(0, 1, VK_FORMAT_R32G32_SFLOAT, offsetof(Vertex, uv))
 		};
 		VkPipelineVertexInputStateCreateInfo vertexInputStateCI = vks::initializers::pipelineVertexInputStateCreateInfo(vertexInputBindingDescriptions, vertexInputAttributeDescriptions);
 
@@ -387,10 +401,62 @@ public:
 	{
 		uniformData.projection = camera.matrices.perspective;
 		uniformData.view = camera.matrices.view;
+		memcpy(uniformBuffers[currentBuffer].mapped, &uniformData, sizeof(UniformData));
 	}
 
-	void buildCommandBuffers()
+	void buildCommandBuffer()
 	{
+		VkCommandBuffer cmdBuffer = drawCmdBuffers[currentBuffer];
+		VkCommandBufferBeginInfo cmdBufferBeginInfo = vks::initializers::commandBufferBeginInfo();
+		VK_CHECK_RESULT(vkBeginCommandBuffer(cmdBuffer, &cmdBufferBeginInfo));
+
+		vks::tools::insertImageMemoryBarrier2(cmdBuffer, swapChain.images[currentImageIndex], 0, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 });
+		vks::tools::insertImageMemoryBarrier2(cmdBuffer, depthStencil.image, 0, VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT, VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT, { VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, 0, 1, 0, 1 });
+
+		VkRenderingAttachmentInfo colorAttachment = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
+		colorAttachment.imageView = swapChain.imageViews[currentImageIndex];
+		colorAttachment.imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL;
+		colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+		colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+		colorAttachment.clearValue = { 0.2f, 0.2f, 0.2f, 1.0f };
+		VkRenderingAttachmentInfo depthStencilAttachment = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
+		depthStencilAttachment.imageView = depthStencil.view;
+		depthStencilAttachment.imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL;
+		depthStencilAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+		depthStencilAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+		depthStencilAttachment.clearValue = { 1.0f, 0.0f };
+
+		VkRenderingInfo renderingInfo{ VK_STRUCTURE_TYPE_RENDERING_INFO };
+		renderingInfo.renderArea = { 0, 0, width, height };
+		renderingInfo.layerCount = 1;
+		renderingInfo.colorAttachmentCount = 1;
+		renderingInfo.pColorAttachments = &colorAttachment;
+		renderingInfo.pDepthAttachment = &depthStencilAttachment;
+		renderingInfo.pStencilAttachment = &depthStencilAttachment;
+
+		vkCmdBeginRendering(cmdBuffer, &renderingInfo);
+
+		VkViewport viewport = vks::initializers::viewport((float)width, (float)height, 0.0f, 1.0f);
+		vkCmdSetViewport(cmdBuffer, 0, 1, &viewport);
+		VkRect2D scissor = vks::initializers::rect2D(width, height, 0, 0);
+		vkCmdSetScissor(cmdBuffer, 0, 1, &scissor);
+
+		vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentBuffer], 0, nullptr);
+		vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+
+		VkDeviceSize offsets[1] = { 0 };
+		vkCmdBindVertexBuffers(cmdBuffer, 0, 1, &vertexBuffer.buffer, offsets);
+		vkCmdBindIndexBuffer(cmdBuffer, indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+
+		vkCmdDrawIndexed(cmdBuffer, indexCount, 1, 0, 0, 0);
+
+		drawUI(cmdBuffer);
+
+		vkCmdEndRendering(cmdBuffer);
+
+		vks::tools::insertImageMemoryBarrier2(cmdBuffer, swapChain.images[currentImageIndex], VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, 0, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 });
+
+		VK_CHECK_RESULT(vkEndCommandBuffer(cmdBuffer));
 	}
 
 	void render() override
@@ -398,8 +464,16 @@ public:
 		if (!prepared) return;
 		VulkanExampleBase::prepareFrame();
 		updateUniformBuffers();
-		buildCommandBuffers();
+		buildCommandBuffer();
 		VulkanExampleBase::submitFrame();
+	}
+
+	void OnUpdateUIOverlay(vks::UIOverlay *overlay) override
+	{
+		if (overlay->header("Settings"))
+		{
+			overlay->sliderFloat("LOD Bias", &uniformData.lodBias, 0.0f, (float)texture.mipLevels);
+		}
 	}
 };
 
