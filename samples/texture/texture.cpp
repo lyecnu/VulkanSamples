@@ -1,4 +1,4 @@
-#include "vulkanexamplebase.h"
+﻿#include "vulkanexamplebase.h"
 #include "ktx.h"
 
 class VulkanExample : public VulkanExampleBase
@@ -31,7 +31,7 @@ public:
 	{
 		glm::mat4 projection;
 		glm::mat4 view;
-		glm::mat4 viewPos;
+		glm::vec4 viewPos;
 		float lodBias = 0.0f;
 	} uniformData;
 	std::array<vks::Buffer, maxConcurrentFrames> uniformBuffers;
@@ -51,13 +51,182 @@ public:
 
 	}
 
+	void getEnabledFeatures() override
+	{
+		if (deviceFeatures.samplerAnisotropy)
+		{
+			enabledFeatures.samplerAnisotropy = VK_TRUE;
+		}
+	}
+
 	void loadTexture()
 	{
 		std::string filename = getAssetPath() + "textures/metalplate01_rgba.ktx";
 		VkFormat format = VK_FORMAT_R8G8B8A8_SRGB;
 
 		ktxResult result;
-		ktxTexture* kTexture;
+		ktxTexture* ktxTexture;
+
+		if (!vks::tools::fileExists(filename))
+		{
+			vks::tools::exitFatal("Texture file not found: " + filename, -1);
+		}
+		result = ktxTexture_CreateFromNamedFile(filename.c_str(), KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT, &ktxTexture);
+		assert(result == KTX_SUCCESS);
+
+		texture.width = ktxTexture->baseWidth;
+		texture.height = ktxTexture->baseHeight;
+		texture.mipLevels = ktxTexture->numLevels;
+		ktx_uint8_t* ktxTextureData = ktxTexture_GetData(ktxTexture);
+		ktx_size_t ktxTextureSize = ktxTexture_GetSize(ktxTexture);
+
+		VkMemoryAllocateInfo memAllocInfo = vks::initializers::memoryAllocateInfo();
+		VkMemoryRequirements memReqs = {};
+
+		VkBuffer stagingBuffer;
+		VkDeviceMemory stagingMemory;
+
+		VkBufferCreateInfo bufferCreateInfo = vks::initializers::bufferCreateInfo();
+		bufferCreateInfo.size = ktxTextureSize;
+		bufferCreateInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+		bufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+		VK_CHECK_RESULT(vkCreateBuffer(device, &bufferCreateInfo, nullptr, &stagingBuffer));
+
+		vkGetBufferMemoryRequirements(device, stagingBuffer, &memReqs);
+		memAllocInfo.allocationSize = memReqs.size;
+		memAllocInfo.memoryTypeIndex = vulkanDevice->getMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+		VK_CHECK_RESULT(vkAllocateMemory(device, &memAllocInfo, nullptr, &stagingMemory));
+		VK_CHECK_RESULT(vkBindBufferMemory(device, stagingBuffer, stagingMemory, 0));
+
+		uint8_t* data;
+		VK_CHECK_RESULT(vkMapMemory(device, stagingMemory, 0, memReqs.size, 0, (void**)&data));
+		memcpy(data, ktxTextureData, ktxTextureSize);
+		vkUnmapMemory(device, stagingMemory);
+
+		std::vector<VkBufferImageCopy> bufferCopyRegions;
+
+		for (uint32_t i = 0; i < texture.mipLevels; ++i)
+		{
+			ktx_size_t offset;
+			KTX_error_code errorCode = ktxTexture_GetImageOffset(ktxTexture, i, 0, 0, &offset);
+			assert(errorCode == KTX_SUCCESS);
+
+			VkBufferImageCopy bufferCopyRegion = {};
+			bufferCopyRegion.bufferOffset = offset;
+			bufferCopyRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+			bufferCopyRegion.imageSubresource.mipLevel = i;
+			bufferCopyRegion.imageSubresource.baseArrayLayer = 0;
+			bufferCopyRegion.imageSubresource.layerCount = 1;
+			bufferCopyRegion.imageExtent.width = ktxTexture->baseWidth >> i;
+			bufferCopyRegion.imageExtent.height = ktxTexture->baseHeight >> i;
+			bufferCopyRegion.imageExtent.depth = 1;
+
+			bufferCopyRegions.push_back(bufferCopyRegion);
+		}
+
+		VkImageCreateInfo imageCreateInfo = vks::initializers::imageCreateInfo();
+		imageCreateInfo.imageType = VK_IMAGE_TYPE_2D;
+		imageCreateInfo.format = format;
+		imageCreateInfo.extent = { texture.width, texture.height, 1 };
+		imageCreateInfo.mipLevels = texture.mipLevels;
+		imageCreateInfo.arrayLayers = 1;
+		imageCreateInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+		imageCreateInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+		imageCreateInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+		imageCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+		imageCreateInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+		VK_CHECK_RESULT(vkCreateImage(device, &imageCreateInfo, nullptr, &texture.image));
+
+		vkGetImageMemoryRequirements(device, texture.image, &memReqs);
+		memAllocInfo.allocationSize = memReqs.size;
+		memAllocInfo.memoryTypeIndex = vulkanDevice->getMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+		VK_CHECK_RESULT(vkAllocateMemory(device, &memAllocInfo, nullptr, &texture.deviceMemory));
+		VK_CHECK_RESULT(vkBindImageMemory(device, texture.image, texture.deviceMemory, 0));
+
+		VkCommandBuffer copyCmd = vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
+
+		VkImageSubresourceRange subresourceRange = {};
+		subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		subresourceRange.baseMipLevel = 0;
+		subresourceRange.levelCount = texture.mipLevels;
+		subresourceRange.baseArrayLayer = 0;
+		subresourceRange.layerCount = 1;
+
+		VkImageMemoryBarrier2 imageMemoryBarrier = vks::initializers::imageMemoryBarrier2();
+		imageMemoryBarrier.srcStageMask = VK_PIPELINE_STAGE_2_NONE;
+		imageMemoryBarrier.srcAccessMask = 0;
+		imageMemoryBarrier.dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT_KHR;
+		imageMemoryBarrier.dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+		imageMemoryBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+		imageMemoryBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+		imageMemoryBarrier.image = texture.image;
+		imageMemoryBarrier.subresourceRange = subresourceRange;
+
+		VkDependencyInfo dependencyInfo{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+		dependencyInfo.imageMemoryBarrierCount = 1;
+		dependencyInfo.pImageMemoryBarriers = &imageMemoryBarrier;
+
+		vkCmdPipelineBarrier2(copyCmd, &dependencyInfo);
+
+		vkCmdCopyBufferToImage(copyCmd, stagingBuffer, texture.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, static_cast<uint32_t>(bufferCopyRegions.size()), bufferCopyRegions.data());
+
+		imageMemoryBarrier.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT_KHR;
+		imageMemoryBarrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+		imageMemoryBarrier.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+		imageMemoryBarrier.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
+		imageMemoryBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+		imageMemoryBarrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+		vkCmdPipelineBarrier2(copyCmd, &dependencyInfo);
+
+		texture.imageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+
+		vulkanDevice->flushCommandBuffer(copyCmd, queue, true);
+
+		vkFreeMemory(device, stagingMemory, nullptr);
+		vkDestroyBuffer(device, stagingBuffer, nullptr);
+
+		ktxTexture_Destroy(ktxTexture);
+
+		VkSamplerCreateInfo samplerCreateInfo = vks::initializers::samplerCreateInfo();
+		samplerCreateInfo.magFilter = VK_FILTER_LINEAR;
+		samplerCreateInfo.minFilter = VK_FILTER_LINEAR;
+		samplerCreateInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+		samplerCreateInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+		samplerCreateInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+		samplerCreateInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+		samplerCreateInfo.mipLodBias = 0.0f;
+		if (vulkanDevice->features.samplerAnisotropy)
+		{
+			samplerCreateInfo.anisotropyEnable = VK_TRUE;
+			samplerCreateInfo.maxAnisotropy = vulkanDevice->properties.limits.maxSamplerAnisotropy;
+		}
+		else
+		{
+			samplerCreateInfo.anisotropyEnable = VK_FALSE;
+			samplerCreateInfo.maxAnisotropy = 1.0f;
+		}
+		samplerCreateInfo.compareEnable = VK_FALSE;
+		samplerCreateInfo.minLod = 0.0f;
+		samplerCreateInfo.maxLod = (float)texture.mipLevels;
+		samplerCreateInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
+		samplerCreateInfo.unnormalizedCoordinates = VK_FALSE;
+		VK_CHECK_RESULT(vkCreateSampler(device, &samplerCreateInfo, nullptr, &texture.sampler));
+
+		VkImageViewCreateInfo imageViewCreateInfo = vks::initializers::imageViewCreateInfo();
+		imageViewCreateInfo.image = texture.image;
+		imageViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+		imageViewCreateInfo.format = format;
+		imageViewCreateInfo.subresourceRange = subresourceRange;
+		VK_CHECK_RESULT(vkCreateImageView(device, &imageViewCreateInfo, nullptr, &texture.imageView));
+	}
+
+	void destroyTexture()
+	{
+		vkDestroySampler(device, texture.sampler, nullptr);
+		vkDestroyImageView(device, texture.imageView, nullptr);
+		vkDestroyImage(device, texture.image, nullptr);
+		vkFreeMemory(device, texture.deviceMemory, nullptr);
 	}
 
 	void generateQuad()
@@ -214,8 +383,10 @@ public:
 		prepared = true;
 	}
 
-	void unpdateUniformBuffers()
+	void updateUniformBuffers()
 	{
+		uniformData.projection = camera.matrices.perspective;
+		uniformData.view = camera.matrices.view;
 	}
 
 	void buildCommandBuffers()
@@ -226,7 +397,7 @@ public:
 	{
 		if (!prepared) return;
 		VulkanExampleBase::prepareFrame();
-		unpdateUniformBuffers();
+		updateUniformBuffers();
 		buildCommandBuffers();
 		VulkanExampleBase::submitFrame();
 	}
