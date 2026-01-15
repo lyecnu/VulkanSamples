@@ -84,6 +84,7 @@ set(EXAMPLES
 	triangle
 	texture
 	gltfloading
+	gltfskinning
 	games106_HW1
 	pipelines
 )
