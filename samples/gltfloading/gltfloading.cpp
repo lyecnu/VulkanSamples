@@ -351,8 +351,7 @@ public:
 	{
 		glm::mat4 projection;
 		glm::mat4 view;
-		glm::vec4 lightPos = glm::vec4(5.0f, 5.0f, -5.0f, 1.0f);
-		glm::vec4 cameraPos;
+		glm::vec3 lightPos = glm::vec3(0.0f, 0.0f, 5.0f);
 	} uniformData;
 	std::array<vks::Buffer, maxConcurrentFrames> uniformBuffers;
 
@@ -564,8 +563,9 @@ public:
 		std::vector<VkVertexInputAttributeDescription> vertexInputAttributeDescriptions
 		{
 			vks::initializers::vertexInputAttributeDescription(0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(VulkanglTFModel::Vertex, position)),
-			vks::initializers::vertexInputAttributeDescription(0, 1, VK_FORMAT_R32G32_SFLOAT, offsetof(VulkanglTFModel::Vertex, uv)),
-			vks::initializers::vertexInputAttributeDescription(0, 2, VK_FORMAT_R32G32B32_SFLOAT, offsetof(VulkanglTFModel::Vertex, color)),
+			vks::initializers::vertexInputAttributeDescription(0, 1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(VulkanglTFModel::Vertex, normal)),
+			vks::initializers::vertexInputAttributeDescription(0, 2, VK_FORMAT_R32G32_SFLOAT, offsetof(VulkanglTFModel::Vertex, uv)),
+			vks::initializers::vertexInputAttributeDescription(0, 3, VK_FORMAT_R32G32B32_SFLOAT, offsetof(VulkanglTFModel::Vertex, color)),
 		};
 		VkPipelineVertexInputStateCreateInfo vertexInputStateCI = vks::initializers::pipelineVertexInputStateCreateInfo(vertexInputBindingDescriptions, vertexInputAttributeDescriptions);
 
