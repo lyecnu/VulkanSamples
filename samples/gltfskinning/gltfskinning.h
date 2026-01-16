@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "vulkanexamplebase.h"
 
@@ -55,15 +55,15 @@ public:
 	struct Node
 	{
 		Node* parent;
-		uint32_t            index;
+		uint32_t           index;
 		std::vector<Node*> children;
-		Mesh                mesh;
-		glm::vec3           translation{};
-		glm::vec3           scale{ 1.0f };
-		glm::quat           rotation{};
-		int32_t             skin = -1;
-		glm::mat4           matrix;
-		glm::mat4           getLocalMatrix();
+		Mesh               mesh;
+		glm::vec3          translation{};
+		glm::vec3          scale{ 1.0f };
+		glm::quat          rotation{};
+		int32_t            skin = -1;
+		glm::mat4          matrix;
+		glm::mat4          getLocalMatrix();
 	};
 
 	struct Vertex
@@ -79,10 +79,14 @@ public:
 	struct Skin
 	{
 		std::string                 name;
-		int32_t                     skeletonRoot = -1;
-		std::vector<int32_t>        joints;
-		std::vector<glm::mat4>      inverseBindMatrices;
+		Node* skeletonRoot = nullptr;
+		std::vector<glm::mat4> inverseBindMatrices;
+		std::vector<Node*> joints;
+		std::array<vks::Buffer, maxConcurrentFrames> storageBuffers;
+		std::array<vks::Buffer, maxConcurrentFrames> descriptorSets;
 	};
+
+
 
 	std::vector<Image>     images;
 	std::vector<Texture>   textures;
