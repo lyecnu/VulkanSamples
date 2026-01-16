@@ -1,171 +1,119 @@
-#define TINYGLTF_IMPLEMENTATION
-#define STB_IMAGE_IMPLEMENTATION
-#define TINYGLTF_NO_STB_IMAGE_WRITE
-#include "tiny_gltf.h"
-#include "vulkanexamplebase.h"
 
-class VulkanglTFModel
+#include "gltfskinning.h"
+
+glm::mat4 VulkanglTFModel::Node::getLocalMatrix()
 {
-public:
-	vks::VulkanDevice* vulkanDevice;
-	VkQueue copyQueue;
+	return glm::translate(glm::mat4(1.0f), translation) * glm::mat4(rotation) * glm::scale(glm::mat4(1.0f), scale) * matrix;
+}
 
-	struct Vertex
+VulkanglTFModel::~VulkanglTFModel()
+{
+	vkDestroyBuffer(vulkanDevice->logicalDevice, vertices.buffer, nullptr);
+	vkFreeMemory(vulkanDevice->logicalDevice, vertices.memory, nullptr);
+	vkDestroyBuffer(vulkanDevice->logicalDevice, indices.buffer, nullptr);
+	vkFreeMemory(vulkanDevice->logicalDevice, indices.memory, nullptr);
+	for (auto& image : images)
 	{
-		glm::vec3 position;
-		glm::vec3 normal;
-		glm::vec2 uv;
-		glm::vec3 color;
-	};
-
-	struct
+		vkDestroyImageView(vulkanDevice->logicalDevice, image.texture.view, nullptr);
+		vkDestroyImage(vulkanDevice->logicalDevice, image.texture.image, nullptr);
+		vkDestroySampler(vulkanDevice->logicalDevice, image.texture.sampler, nullptr);
+		vkFreeMemory(vulkanDevice->logicalDevice, image.texture.deviceMemory, nullptr);
+	}
+	for (auto& skin : skins)
 	{
-		VkBuffer buffer;
-		VkDeviceMemory memory;
-	} vertices;
-
-	struct
-	{
-		int count;
-		VkBuffer buffer;
-		VkDeviceMemory memory;
-	} indices;
-	
-	struct Primitive
-	{
-		uint32_t firstIndex;
-		uint32_t indexCount;
-		int32_t materialIndex;
-	};
-
-	struct Mesh
-	{
-		std::vector<Primitive> primitives;
-	};
-
-	struct Node
-	{
-		Node* parent;
-		std::vector<Node*> children;
-		Mesh mesh;
-		glm::mat4 matrix;
-		~Node()
+		for (auto& buffer : skin.storageBuffers)
 		{
-			for (auto child : children)
-			{
-				delete child;
-			}
-		}
-	};
-
-	struct Material
-	{
-		glm::vec4 baseColorFactor = glm::vec4(1.0f);
-		uint32_t baseColorTextureIndex;
-	};
-
-	struct Image
-	{
-		vks::Texture2D texture;
-		VkDescriptorSet descriptorSet;
-	};
-
-	struct Texture
-	{
-		uint32_t imageIndex;
-	};
-
-	std::vector<Image> images;
-	std::vector<Texture> textures;
-	std::vector<Material> materials;
-	std::vector<Node*> nodes;
-
-	~VulkanglTFModel()
-	{
-		for (auto node : nodes)
-		{
-			delete node;
-		}
-
-		vkDestroyBuffer(vulkanDevice->logicalDevice, vertices.buffer, nullptr);
-		vkFreeMemory(vulkanDevice->logicalDevice, vertices.memory, nullptr);
-		vkDestroyBuffer(vulkanDevice->logicalDevice, indices.buffer, nullptr);
-		vkFreeMemory(vulkanDevice->logicalDevice, indices.memory, nullptr);
-		for (auto& image : images)
-		{
-			vkDestroyImageView(vulkanDevice->logicalDevice, image.texture.view, nullptr);
-			vkDestroyImage(vulkanDevice->logicalDevice, image.texture.image, nullptr);
-			vkDestroySampler(vulkanDevice->logicalDevice, image.texture.sampler, nullptr);
-			vkFreeMemory(vulkanDevice->logicalDevice, image.texture.deviceMemory, nullptr);
+			buffer.destroy();
 		}
 	}
+}
 
-	void loadImages(tinygltf::Model& input)
+void VulkanglTFModel::loadImages(tinygltf::Model& input)
+{
+	images.resize(input.images.size());
+	for (size_t i = 0; i < input.images.size(); i++)
 	{
-		images.resize(input.images.size());
-		for (size_t i = 0; i < input.images.size(); i++)
-		{
-			tinygltf::Image& gltfImage = input.images[i];
-			unsigned char* buffer = nullptr;
-			VkDeviceSize bufferSize = 0;
-			bool deleteBuffer = false;
+		tinygltf::Image& gltfImage = input.images[i];
+		unsigned char* buffer = nullptr;
+		VkDeviceSize bufferSize = 0;
+		bool deleteBuffer = false;
 
-			if (gltfImage.component == 3)
+		if (gltfImage.component == 3)
+		{
+			bufferSize = gltfImage.width * gltfImage.height * 4;
+			buffer = new unsigned char[bufferSize];
+			unsigned char* rgba = buffer;
+			unsigned char* rgb = &gltfImage.image[0];
+			for (size_t i = 0; i < gltfImage.width * gltfImage.height; ++i)
 			{
-				bufferSize = gltfImage.width * gltfImage.height * 4;
-				buffer = new unsigned char[bufferSize];
-				unsigned char* rgba = buffer;
-				unsigned char* rgb = &gltfImage.image[0];
-				for (size_t i = 0; i < gltfImage.width * gltfImage.height; ++i)
-				{
-					memcpy(rgba, rgb, sizeof(unsigned char) * 3);
-					rgba += 4;
-					rgb += 3;
-				}
-				deleteBuffer = true;
+				memcpy(rgba, rgb, sizeof(unsigned char) * 3);
+				rgba += 4;
+				rgb += 3;
 			}
-			else
-			{
-				buffer = &gltfImage.image[0];
-				bufferSize = gltfImage.image.size();
-			}
+			deleteBuffer = true;
+		}
+		else
+		{
+			buffer = &gltfImage.image[0];
+			bufferSize = gltfImage.image.size();
+		}
 			
-			images[i].texture.fromBuffer(buffer, bufferSize, VK_FORMAT_R8G8B8A8_UNORM, gltfImage.width, gltfImage.height, vulkanDevice, copyQueue);
-			if (deleteBuffer)
-			{
-				delete[] buffer;
-			}
-		}
-	}
-
-	void loadTextures(tinygltf::Model& input)
-	{
-		textures.resize(input.textures.size());
-		for (size_t i = 0; i < input.textures.size(); i++)
+		images[i].texture.fromBuffer(buffer, bufferSize, VK_FORMAT_R8G8B8A8_UNORM, gltfImage.width, gltfImage.height, vulkanDevice, copyQueue);
+		if (deleteBuffer)
 		{
-			textures[i].imageIndex = input.textures[i].source;
+			delete[] buffer;
 		}
 	}
+}
 
-	void loadMaterials(tinygltf::Model& input)
+void VulkanglTFModel::loadTextures(tinygltf::Model& input)
+{
+	textures.resize(input.textures.size());
+	for (size_t i = 0; i < input.textures.size(); i++)
 	{
-		materials.resize(input.materials.size());
-		for (size_t i = 0; i < input.materials.size(); i++)
+		textures[i].imageIndex = input.textures[i].source;
+	}
+}
+
+void VulkanglTFModel::loadMaterials(tinygltf::Model& input)
+{
+	materials.resize(input.materials.size());
+	for (size_t i = 0; i < input.materials.size(); i++)
+	{
+		tinygltf::Material& gltfMaterial = input.materials[i];
+		if (gltfMaterial.values.find("baseColorFactor") != gltfMaterial.values.end())
 		{
-			tinygltf::Material& gltfMaterial = input.materials[i];
-			Material& material = materials[i];
-			if (gltfMaterial.values.find("baseColorFactor") != gltfMaterial.values.end())
+			materials[i].baseColorFactor = glm::make_vec4(gltfMaterial.values["baseColorFactor"].ColorFactor().data());
+		}
+		if (gltfMaterial.values.find("baseColorTexture") != gltfMaterial.values.end())
+		{
+			materials[i].baseColorTextureIndex = gltfMaterial.values["baseColorTexture"].TextureIndex();
+		}
+	}
+}
+
+VulkanglTFModel::Node* VulkanglTFModel::findNode(Node* parent, uint32_t index)
+{
+	Node* nodeFound = nullptr;
+	if (parent->index == index)
+	{
+		return parent;
+	}
+	else
+	{
+		for (auto& child : parent->children)
+		{
+			nodeFound = findNode(child, index);
+			if (nodeFound)
 			{
-				material.baseColorFactor = glm::make_vec4(gltfMaterial.values["baseColorFactor"].ColorFactor().data());
-			}
-			if (gltfMaterial.values.find("baseColorTexture") != gltfMaterial.values.end())
-			{
-				material.baseColorTextureIndex = gltfMaterial.values["baseColorTexture"].TextureIndex();
+				break;
 			}
 		}
 	}
+	return nodeFound;
+}
 
-	void loadNode(const tinygltf::Node& inputNode, const tinygltf::Model& input, Node* parent, std::vector<uint32_t>& indexBuffer, std::vector<Vertex>& vertexBuffer)
+	void VulkanglTFModel::loadNode(const tinygltf::Node& inputNode, const tinygltf::Model& input, Node* parent, std::vector<uint32_t>& indexBuffer, std::vector<Vertex>& vertexBuffer)
 	{
 		Node* node = new VulkanglTFModel::Node();
 		node->matrix = glm::mat4(1.0f);
