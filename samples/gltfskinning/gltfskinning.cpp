@@ -113,11 +113,56 @@ VulkanglTFModel::Node* VulkanglTFModel::findNode(Node* parent, uint32_t index)
 	return nodeFound;
 }
 
-	void VulkanglTFModel::loadNode(const tinygltf::Node& inputNode, const tinygltf::Model& input, Node* parent, std::vector<uint32_t>& indexBuffer, std::vector<Vertex>& vertexBuffer)
+VulkanglTFModel::Node* VulkanglTFModel::nodeFromIndex(uint32_t index)
+{
+	Node* nodeFound = nullptr;
+	for (auto& node : nodes)
 	{
-		Node* node = new VulkanglTFModel::Node();
-		node->matrix = glm::mat4(1.0f);
-		node->parent = parent;
+		nodeFound = findNode(node, index);
+		if (nodeFound)
+		{
+			break;
+		}
+	}
+	return nodeFound;
+}
+
+void VulkanglTFModel::loadSkins(tinygltf::Model& input)
+{
+	skins.resize(input.skins.size());
+	for (size_t i = 0; i < input.skins.size(); i++)
+	{
+		tinygltf::Skin& gltfSkin = input.skins[i];
+		skins[i].name = gltfSkin.name;
+		skins[i].skeletonRoot = nodeFromIndex(gltfSkin.skeleton);
+		for (int jointIndex : gltfSkin.joints)
+		{
+			;
+		}
+		skins[i].jointIndices = gltfSkin.jointIndices;
+	}
+}
+
+void VulkanglTFModel::loadNode(const tinygltf::Node& inputNode, const tinygltf::Model& input, VulkanglTFModel::Node* parent, uint32_t nodeIndex, std::vector<uint32_t>& indexBuffer, std::vector<VulkanglTFModel::Vertex>& vertexBuffer)
+{
+	Node* node = new Node();
+	node->parent = parent;
+	node->matrix = glm::mat4(1.0f);
+	node->index = nodeIndex;
+	node->skin = inputNode.skin;
+
+	if (inputNode.translation.size() == 3)
+	{
+		node->translation = glm::make_vec3(inputNode.translation.data());
+	}
+	if (inputNode.rotation.size() == 4)
+	{
+		node->rotation = glm::make_quat(inputNode.rotation.data());
+	}
+	if (inputNode.scale.size() == 3)
+	{
+		node->matrix = glm::scale(node->matrix, glm::vec3(glm::make_vec3(inputNode.scale.data())));
+	}
 
 		if (inputNode.matrix.size() == 16)
 		{
@@ -125,19 +170,7 @@ VulkanglTFModel::Node* VulkanglTFModel::findNode(Node* parent, uint32_t index)
 		}
 		else
 		{
-			if (inputNode.translation.size() == 3)
-			{
-				node->matrix = glm::translate(node->matrix, glm::vec3(glm::make_vec3(inputNode.translation.data())));
-			}
-			if (inputNode.rotation.size() == 4)
-			{
-				glm::quat q = glm::make_quat(inputNode.rotation.data());
-				node->matrix *= glm::mat4_cast(q);
-			}
-			if (inputNode.scale.size() == 3)
-			{
-				node->matrix = glm::scale(node->matrix, glm::vec3(glm::make_vec3(inputNode.scale.data())));
-			}
+
 		}
 
 		if (inputNode.children.size() > 0)
