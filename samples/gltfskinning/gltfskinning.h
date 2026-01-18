@@ -87,7 +87,7 @@ public:
 		std::vector<glm::mat4>							inverseBindMatrices;
 		std::vector<Node*>								joints;
 		std::array<vks::Buffer, maxConcurrentFrames>	storageBuffers;
-		std::array<vks::Buffer, maxConcurrentFrames>	descriptorSets;
+		std::array<VkDescriptorSet, maxConcurrentFrames>	descriptorSets{};
 	};
 
 	struct AnimationSampler
@@ -148,7 +148,7 @@ public:
 	struct UniformData
 	{
 		glm::mat4 projection;
-		glm::mat4 model;
+		glm::mat4 view;
 		glm::vec4 lightPos = glm::vec4(5.0f, 5.0f, 5.0f, 1.0f);
 	} uniformData;
 	std::array<vks::Buffer, maxConcurrentFrames> uniformBuffers;
