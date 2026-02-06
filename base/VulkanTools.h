@@ -1,4 +1,4 @@
-/*
+﻿/*
  * Assorted Vulkan helper functions
  *
  * Copyright (C) 2016-2023 by Sascha Willems - www.saschawillems.de
@@ -119,6 +119,17 @@ namespace vks
 			VkImageLayout newImageLayout,
 			VkPipelineStageFlags srcStageMask,
 			VkPipelineStageFlags dstStageMask,
+			VkImageSubresourceRange subresourceRange);
+
+		void insertImageMemoryBarrier2(
+			VkCommandBuffer cmdbuffer,
+			VkImage image,
+			VkAccessFlags2 srcAccessMask,
+			VkAccessFlags2 dstAccessMask,
+			VkImageLayout oldImageLayout,
+			VkImageLayout newImageLayout,
+			VkPipelineStageFlags2 srcStageMask,
+			VkPipelineStageFlags2 dstStageMask,
 			VkImageSubresourceRange subresourceRange);
 
 		// Display error message and exit on fatal error

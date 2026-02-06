@@ -1,4 +1,4 @@
-/*
+﻿/*
 * Vulkan Example base class
 *
 * Copyright (C) 2016-2025 by Sascha Willems - www.saschawillems.de
@@ -1079,6 +1079,25 @@ bool VulkanExampleBase::initVulkan()
 
 	// Derived examples can enable extensions based on the list of supported extensions read from the physical device
 	getEnabledExtensions();
+
+	// Enable recommended Vulkan 1.3 features (e.g. dynamic rendering) by default when available
+	if (apiVersion >= VK_API_VERSION_1_3) {
+		VkPhysicalDeviceVulkan13Features availableVulkan13Features{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
+		VkPhysicalDeviceFeatures2 availableFeatures2{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &availableVulkan13Features };
+		vkGetPhysicalDeviceFeatures2(physicalDevice, &availableFeatures2);
+
+		enabledVulkan13Features = VkPhysicalDeviceVulkan13Features{
+			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
+			.synchronization2 = availableVulkan13Features.synchronization2,
+			.dynamicRendering = availableVulkan13Features.dynamicRendering,
+			.maintenance4 = availableVulkan13Features.maintenance4
+		};
+
+		if (enabledVulkan13Features.dynamicRendering || enabledVulkan13Features.synchronization2 || enabledVulkan13Features.maintenance4) {
+			enabledVulkan13Features.pNext = deviceCreatepNextChain;
+			deviceCreatepNextChain = &enabledVulkan13Features;
+		}
+	}
 
 	result = vulkanDevice->createLogicalDevice(enabledFeatures, enabledDeviceExtensions, deviceCreatepNextChain);
 	if (result != VK_SUCCESS) {
@@ -3017,6 +3036,10 @@ void VulkanExampleBase::setupDepthStencil()
 
 void VulkanExampleBase::setupFrameBuffer()
 {
+	if (useDynamicRendering) {
+		frameBuffers.clear();
+		return;
+	}
 	// Create frame buffers for every swap chain image, only one depth/stencil attachment is required, as this is owned by the application
 	frameBuffers.resize(swapChain.images.size());
 	for (uint32_t i = 0; i < frameBuffers.size(); i++) {
@@ -3036,6 +3059,10 @@ void VulkanExampleBase::setupFrameBuffer()
 
 void VulkanExampleBase::setupRenderPass()
 {
+	if (useDynamicRendering) {
+		renderPass = VK_NULL_HANDLE;
+		return;
+	}
 	std::array<VkAttachmentDescription, 2> attachments{
 		// Color attachment
 		VkAttachmentDescription{
