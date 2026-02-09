@@ -82,6 +82,7 @@ endfunction(buildExamples)
 
 set(EXAMPLES
 	triangle
+	pipelines
 )
 
 buildExamples()
