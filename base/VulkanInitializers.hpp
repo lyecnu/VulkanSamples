@@ -1,4 +1,4 @@
-/*
+﻿/*
 * Initializers for Vulkan structures and objects used by the examples
 * Saves lot of VK_STRUCTURE_TYPE assignments
 * Some initializers are parameterized for convenience
@@ -88,6 +88,13 @@ namespace vks
 			imageMemoryBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 			imageMemoryBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 			return imageMemoryBarrier;
+		}
+
+		inline VkImageMemoryBarrier2 imageMemoryBarrier2()
+		{
+			VkImageMemoryBarrier2 imageMemoryBarrier2{};
+			imageMemoryBarrier2.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+			return imageMemoryBarrier2;
 		}
 
 		/** @brief Initialize a buffer memory barrier with no image transfer ownership */
@@ -646,5 +653,33 @@ namespace vks
 			return writeDescriptorSetAccelerationStructureKHR;
 		}
 
+		inline VkPipelineRenderingCreateInfo pipelineRenderingCreateInfo()
+		{
+			VkPipelineRenderingCreateInfo pipelineRenderingCreateInfo{};
+			pipelineRenderingCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+			return pipelineRenderingCreateInfo;
+		}
+
+		inline VkRenderingInfo renderingInfo()
+		{
+			VkRenderingInfo renderingInfo{};
+			renderingInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+			renderingInfo.layerCount = 1;
+			return renderingInfo;
+		}
+
+		inline VkRenderingAttachmentInfo renderingAttachmentInfo()
+		{
+			VkRenderingAttachmentInfo renderingAttachmentInfo{};
+			renderingAttachmentInfo.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+			return renderingAttachmentInfo;
+		}
+
+		inline VkDependencyInfo dependencyInfo()
+		{
+			VkDependencyInfo dependencyInfo{};
+			dependencyInfo.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+			return dependencyInfo;
+		}
 	}
 }
