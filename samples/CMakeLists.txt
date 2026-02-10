@@ -37,6 +37,17 @@ function(buildExample EXAMPLE_NAME)
 		       target_link_libraries(${EXAMPLE_NAME} base )
 	       endif(WIN32)
 
+		# Set Visual Studio solution folder for grouping
+		if(WIN32)
+			if(EXAMPLE_NAME IN_LIST EXAMPLES_BASE)
+				set_target_properties(${EXAMPLE_NAME} PROPERTIES FOLDER "basics")
+			endif()
+			# Add more groups as needed, e.g.:
+			# if(EXAMPLE_NAME IN_LIST EXAMPLES_GAMES106)
+			#     set_target_properties(${EXAMPLE_NAME} PROPERTIES FOLDER "samples/games106")
+			# endif()
+		endif()
+
 	file(MAKE_DIRECTORY ${CMAKE_SOURCE_DIR}/bin)
 	set_target_properties(${EXAMPLE_NAME} PROPERTIES VS_DEBUGGER_WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/bin)
 	if(${EXAMPLE_NAME} STREQUAL "texture3d")
@@ -80,9 +91,18 @@ function(buildExamples)
 	endforeach(EXAMPLE)
 endfunction(buildExamples)
 
-set(EXAMPLES
+set(EXAMPLES_BASE
 	triangle
 	pipelines
+)
+
+# Reserved: add more groups later, e.g. GAMES106
+# set(EXAMPLES_GAMES106 xxx)
+
+# Collect all group examples
+set(EXAMPLES
+	${EXAMPLES_BASE}
+	# ${EXAMPLES_GAMES106}
 )
 
 buildExamples()

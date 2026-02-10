@@ -1,4 +1,4 @@
-/*
+﻿/*
 * Vulkan Example - Using different pipelines in a single renderpass
 * 
 * This sample shows how to setup multiple graphics pipelines and how to use them for drawing objects with differring visuals
@@ -16,9 +16,10 @@ class VulkanExample: public VulkanExampleBase
 public:
 	vkglTF::Model scene;
 
-	struct UniformData {
+	struct UniformData
+	{
 		glm::mat4 projection;
-		glm::mat4 modelView;
+		glm::mat4 view;
 		glm::vec4 lightPos{ 0.0f, 2.0f, 1.0f, 0.0f };
 	} uniformData;
 	std::array<vks::Buffer, maxConcurrentFrames> uniformBuffers;
@@ -27,7 +28,8 @@ public:
 	VkDescriptorSetLayout descriptorSetLayout{ VK_NULL_HANDLE };
 	std::array<VkDescriptorSet, maxConcurrentFrames> descriptorSets{};
 
-	struct {
+	struct
+	{
 		VkPipeline phong{ VK_NULL_HANDLE };
 		VkPipeline wireframe{ VK_NULL_HANDLE };
 		VkPipeline toon{ VK_NULL_HANDLE };
@@ -45,7 +47,8 @@ public:
 
 	~VulkanExample()
 	{
-		if (device) {
+		if (device)
+		{
 			vkDestroyPipeline(device, pipelines.phong, nullptr);
 			if (enabledFeatures.fillModeNonSolid) {
 				vkDestroyPipeline(device, pipelines.wireframe, nullptr);
@@ -115,7 +118,12 @@ public:
 		VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, nullptr, &pipelineLayout));
 
 		// Pipelines
-		
+		VkPipelineRenderingCreateInfo pipelineRenderingInfo = vks::initializers::pipelineRenderingCreateInfo();
+		pipelineRenderingInfo.colorAttachmentCount = 1;
+		pipelineRenderingInfo.pColorAttachmentFormats = &swapChain.colorFormat;
+		pipelineRenderingInfo.depthAttachmentFormat = depthFormat;
+		pipelineRenderingInfo.stencilAttachmentFormat = depthFormat;
+
 		// Most state is shared between all pipelines
 		VkPipelineInputAssemblyStateCreateInfo inputAssemblyState = vks::initializers::pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, VK_FALSE);
 		VkPipelineRasterizationStateCreateInfo rasterizationState = vks::initializers::pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_COUNTER_CLOCKWISE, 0);
@@ -129,6 +137,7 @@ public:
 		std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages{};
 
 		VkGraphicsPipelineCreateInfo pipelineCI = vks::initializers::pipelineCreateInfo(pipelineLayout, renderPass);
+		pipelineCI.pNext = &pipelineRenderingInfo;
 		pipelineCI.pInputAssemblyState = &inputAssemblyState;
 		pipelineCI.pRasterizationState = &rasterizationState;
 		pipelineCI.pColorBlendState = &colorBlendState;
@@ -191,7 +200,7 @@ public:
 		// Override the base sample camera setup, since we use three viewports
 		camera.setPerspective(60.0f, (float)(width / 3.0f) / (float)height, 0.1f, 256.0f);
 		uniformData.projection = camera.matrices.perspective;
-		uniformData.modelView = camera.matrices.view;
+		uniformData.view = camera.matrices.view;
 		memcpy(uniformBuffers[currentBuffer].mapped, &uniformData, sizeof(UniformData));
 	}
 
@@ -211,23 +220,37 @@ public:
 		
 		VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
 
-		VkClearValue clearValues[2]{};
-		clearValues[0].color = defaultClearColor;
-		clearValues[1].depthStencil = { 1.0f, 0 };
+		VkRenderingAttachmentInfo colorAttachment = vks::initializers::renderingAttachmentInfo();
+		colorAttachment.imageView = swapChain.imageViews[currentImageIndex];
+		colorAttachment.imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL;
+		colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+		colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+		colorAttachment.clearValue = { 0.1f, 0.1f, 0.1f, 1.0f };
 
-		VkRenderPassBeginInfo renderPassBeginInfo = vks::initializers::renderPassBeginInfo();
-		renderPassBeginInfo.renderPass = renderPass;
-		renderPassBeginInfo.renderArea.offset.x = 0;
-		renderPassBeginInfo.renderArea.offset.y = 0;
-		renderPassBeginInfo.renderArea.extent.width = width;
-		renderPassBeginInfo.renderArea.extent.height = height;
-		renderPassBeginInfo.clearValueCount = 2;
-		renderPassBeginInfo.pClearValues = clearValues;
-		renderPassBeginInfo.framebuffer = frameBuffers[currentImageIndex];
+		VkRenderingAttachmentInfo depthStencilAttachment = vks::initializers::renderingAttachmentInfo();
+		depthStencilAttachment.imageView = depthStencil.view;
+		depthStencilAttachment.imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL;
+		depthStencilAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+		depthStencilAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+		depthStencilAttachment.clearValue = { 1, 0.0f };
+
+		VkRenderingInfo renderingInfo = vks::initializers::renderingInfo();
+		renderingInfo.renderArea.extent = { width, height };
+		renderingInfo.layerCount = 1;
+		renderingInfo.colorAttachmentCount = 1;
+		renderingInfo.pColorAttachments = &colorAttachment;
+		renderingInfo.pDepthAttachment = &depthStencilAttachment;
+		renderingInfo.pStencilAttachment = &depthStencilAttachment;
 
 		VK_CHECK_RESULT(vkBeginCommandBuffer(cmdBuffer, &cmdBufInfo));
 
-		vkCmdBeginRenderPass(cmdBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+		vks::tools::insertImageMemoryBarrier2(cmdBuffer, swapChain.images[currentImageIndex],
+			0, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+			VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+			VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+			{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 });
+
+		vkCmdBeginRendering(cmdBuffer, &renderingInfo);
 
 		VkViewport viewport = vks::initializers::viewport((float)width, (float)height, 0.0f, 1.0f);
 		vkCmdSetViewport(cmdBuffer, 0, 1, &viewport);
@@ -265,7 +288,13 @@ public:
 
 		drawUI(cmdBuffer);
 
-		vkCmdEndRenderPass(cmdBuffer);
+		vkCmdEndRendering(cmdBuffer);
+
+		vks::tools::insertImageMemoryBarrier2(cmdBuffer, swapChain.images[currentImageIndex],
+			VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, 0,
+			VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+			VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
+			{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 });
 
 		VK_CHECK_RESULT(vkEndCommandBuffer(cmdBuffer));
 	}
