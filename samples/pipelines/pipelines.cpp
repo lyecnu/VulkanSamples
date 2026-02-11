@@ -16,10 +16,9 @@ class VulkanExample: public VulkanExampleBase
 public:
 	vkglTF::Model scene;
 
-	struct UniformData
-	{
+	struct UniformData {
 		glm::mat4 projection;
-		glm::mat4 view;
+		glm::mat4 modelView;
 		glm::vec4 lightPos{ 0.0f, 2.0f, 1.0f, 0.0f };
 	} uniformData;
 	std::array<vks::Buffer, maxConcurrentFrames> uniformBuffers;
@@ -200,7 +199,7 @@ public:
 		// Override the base sample camera setup, since we use three viewports
 		camera.setPerspective(60.0f, (float)(width / 3.0f) / (float)height, 0.1f, 256.0f);
 		uniformData.projection = camera.matrices.perspective;
-		uniformData.view = camera.matrices.view;
+		uniformData.modelView = camera.matrices.view;
 		memcpy(uniformBuffers[currentBuffer].mapped, &uniformData, sizeof(UniformData));
 	}
 
