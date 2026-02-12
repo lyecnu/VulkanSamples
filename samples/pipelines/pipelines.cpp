@@ -224,14 +224,14 @@ public:
 		colorAttachment.imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL;
 		colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
 		colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-		colorAttachment.clearValue = { 0.1f, 0.1f, 0.1f, 1.0f };
+		colorAttachment.clearValue.color = defaultClearColor;
 
 		VkRenderingAttachmentInfo depthStencilAttachment = vks::initializers::renderingAttachmentInfo();
 		depthStencilAttachment.imageView = depthStencil.view;
 		depthStencilAttachment.imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL;
 		depthStencilAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
 		depthStencilAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-		depthStencilAttachment.clearValue = { 1, 0.0f };
+		depthStencilAttachment.clearValue = { 1.0f, 0 };
 
 		VkRenderingInfo renderingInfo = vks::initializers::renderingInfo();
 		renderingInfo.renderArea.extent = { width, height };
