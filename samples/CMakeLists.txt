@@ -94,6 +94,7 @@ endfunction(buildExamples)
 set(EXAMPLES_BASE
 	triangle
 	pipelines
+	descriptorsets
 )
 
 # Reserved: add more groups later, e.g. GAMES106
