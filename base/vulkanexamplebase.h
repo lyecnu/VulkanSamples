@@ -1,4 +1,4 @@
-﻿/*
+/*
 * Vulkan Example base class
 *
 * Copyright (C) 2016-2025 by Sascha Willems - www.saschawillems.de
@@ -92,7 +92,7 @@ private:
 	void createSwapChain();
 	void createCommandBuffers();
 	void destroyCommandBuffers();
-	std::string shaderDir = "samples";
+	std::string shaderDir = "glsl";
 protected:
 	// Returns the path to the root of the glsl, hlsl or slang shader directory.
 	std::string getShadersPath() const;
@@ -118,8 +118,6 @@ protected:
 	std::vector<const char*> enabledDeviceExtensions;
 	/** @brief Set of instance extensions to be enabled for this example (must be set in the derived constructor) */
 	std::vector<const char*> enabledInstanceExtensions;
-	/** @brief Enabled Vulkan 1.3 feature set (used to enable recommended core features like dynamic rendering) */
-	VkPhysicalDeviceVulkan13Features enabledVulkan13Features{};
 	/** @brief Set of layer settings to be enabled for this example (must be set in the derived constructor) */
 	std::vector<VkLayerSettingEXT> enabledLayerSettings;
 	/** @brief Optional pNext structure for passing extension structures to device creation */
@@ -156,8 +154,6 @@ protected:
 	std::array<VkFence, maxConcurrentFrames> waitFences;
 
 	bool requiresStencil{ false };
-	// Use dynamic rendering by default (no render pass / framebuffers)
-	bool useDynamicRendering{ true };
 public:
 	bool prepared = false;
 	bool resized = false;
@@ -218,7 +214,7 @@ public:
 
 	std::string title = "Vulkan Example";
 	std::string name = "vulkanExample";
-	uint32_t apiVersion = VK_API_VERSION_1_3;
+	uint32_t apiVersion = VK_API_VERSION_1_0;
 
 	/** @brief Default depth stencil attachment used by the default render pass */
 	struct {

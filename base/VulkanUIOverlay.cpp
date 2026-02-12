@@ -28,62 +28,22 @@ namespace vks
 		ImGui::CreateContext();
 		// Color scheme
 		ImGuiStyle& style = ImGui::GetStyle();
-
-		ImVec4 brightPurple = ImVec4(0.55f, 0.1f, 0.55f, 1.0f);
-		ImVec4 brightPurpleAlpha = ImVec4(0.55f, 0.1f, 0.55f, 0.5f);
-		ImVec4 brightPurpleLow = ImVec4(0.55f, 0.1f, 0.55f, 0.15f);
-
-		ImVec4 windowBg = ImVec4(0.13f, 0.14f, 0.16f, 1.0f);
-		ImVec4 frameBg = ImVec4(0.22f, 0.23f, 0.26f, 0.95f);
-		ImVec4 frameBgHover = ImVec4(0.32f, 0.33f, 0.36f, 0.95f);
-		ImVec4 frameBgActive = ImVec4(0.40f, 0.41f, 0.44f, 0.95f);
-
-		ImVec4 textBright = ImVec4(0.93f, 0.93f, 0.97f, 1.0f);
-
-		ImVec4 btn = ImVec4(0.65f, 0.25f, 0.60f, 0.85f);
-		ImVec4 btnHover = ImVec4(0.75f, 0.35f, 0.70f, 0.95f);
-		ImVec4 btnActive = ImVec4(0.55f, 0.15f, 0.50f, 1.0f);
-
-		ImVec4 slider = ImVec4(0.70f, 0.70f, 0.75f, 0.9f);
-		ImVec4 sliderActive = ImVec4(0.85f, 0.85f, 0.90f, 1.0f);
-
-		ImVec4 checkMark = ImVec4(0.32f, 0.85f, 0.32f, 0.95f);
-
-		ImVec4 border = ImVec4(0.32f, 0.38f, 0.42f, 0.7f);
-
-		style.Colors[ImGuiCol_TitleBg] = brightPurple;
-		style.Colors[ImGuiCol_TitleBgActive] = brightPurple;
-		style.Colors[ImGuiCol_TitleBgCollapsed] = brightPurpleLow;
-		style.Colors[ImGuiCol_MenuBarBg] = brightPurpleAlpha;
-
-		style.Colors[ImGuiCol_Header] = brightPurpleAlpha;
-		style.Colors[ImGuiCol_HeaderActive] = brightPurple;
-		style.Colors[ImGuiCol_HeaderHovered] = brightPurple;
-
-		style.Colors[ImGuiCol_FrameBg] = frameBg;
-		style.Colors[ImGuiCol_FrameBgHovered] = frameBgHover;
-		style.Colors[ImGuiCol_FrameBgActive] = frameBgActive;
-
-		style.Colors[ImGuiCol_Button] = btn;
-		style.Colors[ImGuiCol_ButtonHovered] = btnHover;
-		style.Colors[ImGuiCol_ButtonActive] = btnActive;
-
-		style.Colors[ImGuiCol_SliderGrab] = slider;
-		style.Colors[ImGuiCol_SliderGrabActive] = sliderActive;
-
-		style.Colors[ImGuiCol_CheckMark] = checkMark;
-		style.Colors[ImGuiCol_Border] = border;
-		style.Colors[ImGuiCol_BorderShadow] = ImVec4(0, 0, 0, 0.0f);
-
-		style.Colors[ImGuiCol_Text] = textBright;
-		style.Colors[ImGuiCol_WindowBg] = windowBg;
-
-		style.Colors[ImGuiCol_Separator] = brightPurpleAlpha;
-		style.Colors[ImGuiCol_SeparatorHovered] = brightPurple;
-		style.Colors[ImGuiCol_SeparatorActive] = brightPurple;
-
-		style.FrameBorderSize = 1.0f;
-
+		style.Colors[ImGuiCol_TitleBg] = ImVec4(1.0f, 0.0f, 0.0f, 1.0f);
+		style.Colors[ImGuiCol_TitleBgActive] = ImVec4(1.0f, 0.0f, 0.0f, 1.0f);
+		style.Colors[ImGuiCol_TitleBgCollapsed] = ImVec4(1.0f, 0.0f, 0.0f, 0.1f);
+		style.Colors[ImGuiCol_MenuBarBg] = ImVec4(1.0f, 0.0f, 0.0f, 0.4f);
+		style.Colors[ImGuiCol_Header] = ImVec4(0.8f, 0.0f, 0.0f, 0.4f);
+		style.Colors[ImGuiCol_HeaderActive] = ImVec4(1.0f, 0.0f, 0.0f, 0.4f);
+		style.Colors[ImGuiCol_HeaderHovered] = ImVec4(1.0f, 0.0f, 0.0f, 0.4f);
+		style.Colors[ImGuiCol_FrameBg] = ImVec4(0.0f, 0.0f, 0.0f, 0.8f);
+		style.Colors[ImGuiCol_CheckMark] = ImVec4(1.0f, 0.0f, 0.0f, 0.8f);
+		style.Colors[ImGuiCol_SliderGrab] = ImVec4(1.0f, 0.0f, 0.0f, 0.4f);
+		style.Colors[ImGuiCol_SliderGrabActive] = ImVec4(1.0f, 0.0f, 0.0f, 0.8f);
+		style.Colors[ImGuiCol_FrameBgHovered] = ImVec4(1.0f, 1.0f, 1.0f, 0.1f);
+		style.Colors[ImGuiCol_FrameBgActive] = ImVec4(1.0f, 1.0f, 1.0f, 0.2f);
+		style.Colors[ImGuiCol_Button] = ImVec4(1.0f, 0.0f, 0.0f, 0.4f);
+		style.Colors[ImGuiCol_ButtonHovered] = ImVec4(1.0f, 0.0f, 0.0f, 0.6f);
+		style.Colors[ImGuiCol_ButtonActive] = ImVec4(1.0f, 0.0f, 0.0f, 0.8f);
 		// Dimensions
 		ImGuiIO& io = ImGui::GetIO();
 		io.FontGlobalScale = scale;
@@ -119,7 +79,7 @@ namespace vks
 		}
 #else
 		const std::string filename = getAssetPath() + "Roboto-Medium.ttf";
-		io.Fonts->AddFontFromFileTTF(filename.c_str(), 18.0f * scale);
+		io.Fonts->AddFontFromFileTTF(filename.c_str(), 16.0f * scale);
 #endif
 		io.Fonts->GetTexDataAsRGBA32(&fontData, &texWidth, &texHeight);
 		VkDeviceSize uploadSize = texWidth*texHeight * 4 * sizeof(char);

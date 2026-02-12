@@ -4,11 +4,9 @@
 cmake_minimum_required(VERSION 3.10.0 FATAL_ERROR)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake")
 
-set(NAME VulkanSamples)
+set(NAME vulkanExamples)
 
 project(${NAME})
-
-set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
 include_directories(external)
 include_directories(external/glm)
@@ -181,4 +179,4 @@ ENDIF(WIN32)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/")
 
 add_subdirectory(base)
-add_subdirectory(samples)
+add_subdirectory(examples)
