@@ -8,6 +8,8 @@ set(NAME VulkanSamples)
 
 project(${NAME})
 
+set_property(GLOBAL PROPERTY USE_FOLDERS ON)
+
 include_directories(external)
 include_directories(external/glm)
 include_directories(external/gli)
