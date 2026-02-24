@@ -93,8 +93,18 @@ endfunction(buildExamples)
 
 set(EXAMPLES_BASE
 	triangle
-	pipelines
-	descriptorsets
+	pipeline
+	descriptorset
+	dynamicuniformbuffer
+	pushconstant
+	specializationconstant
+	texture
+	texturearray
+	cubemaptexture
+	cubemaptexturearray
+	texture3d
+	inputattachment
+	subpass
 )
 
 # Reserved: add more groups later, e.g. GAMES106
