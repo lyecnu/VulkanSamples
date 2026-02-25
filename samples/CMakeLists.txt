@@ -105,6 +105,9 @@ set(EXAMPLES_BASE
 	texture3d
 	inputattachment
 	subpass
+	offscreen
+	particlesystem
+	stencilbuffer
 )
 
 # Reserved: add more groups later, e.g. GAMES106
