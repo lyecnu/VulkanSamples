@@ -39,7 +39,7 @@ public:
 	{
 		VkDescriptorSet depthMap;
 	};
-	std::array<VkDescriptorSet, maxConcurrentFrames> descriptorSets{};
+	std::array<DescriptorSets, maxConcurrentFrames> descriptorSets{};
 
 	struct
 	{
@@ -53,7 +53,7 @@ public:
 		VkImage image{ VK_NULL_HANDLE };
 		VkImageView view{ VK_NULL_HANDLE };
 		VkDeviceMemory memory{ VK_NULL_HANDLE };
-	} shadowMap;
+	} shadowMapAttachment;
 
 	const VkFormat shadowMapFormat{ VK_FORMAT_D16_UNORM };
 
@@ -84,29 +84,29 @@ public:
 		VkImageCreateInfo imageInfo = vks::initializers::imageCreateInfo();
 		imageInfo.imageType = VK_IMAGE_TYPE_2D;
 		imageInfo.format = shadowMapFormat;
-		imageInfo.extent = { shadowMap.width, shadowMap.height, 1 };
+		imageInfo.extent = { shadowMapAttachment.width, shadowMapAttachment.height, 1 };
 		imageInfo.mipLevels = 1;
 		imageInfo.arrayLayers = 1;
 		imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
 		imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
 		imageInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
 		imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-		VK_CHECK_RESULT(vkCreateImage(device, &imageInfo, nullptr, &shadowMap.image));
+		VK_CHECK_RESULT(vkCreateImage(device, &imageInfo, nullptr, &shadowMapAttachment.image));
 
 		VkMemoryAllocateInfo memAllocInfo = vks::initializers::memoryAllocateInfo();
 		VkMemoryRequirements memReqs;
-		vkGetImageMemoryRequirements(device, shadowMap.image, &memReqs);
+		vkGetImageMemoryRequirements(device, shadowMapAttachment.image, &memReqs);
 		memAllocInfo.allocationSize = memReqs.size;
 		memAllocInfo.memoryTypeIndex = vulkanDevice->getMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-		VK_CHECK_RESULT(vkAllocateMemory(device, &memAllocInfo, nullptr, &shadowMap.memory));
-		VK_CHECK_RESULT(vkBindImageMemory(device, shadowMap.image, shadowMap.memory, 0));
+		VK_CHECK_RESULT(vkAllocateMemory(device, &memAllocInfo, nullptr, &shadowMapAttachment.memory));
+		VK_CHECK_RESULT(vkBindImageMemory(device, shadowMapAttachment.image, shadowMapAttachment.memory, 0));
 
 		VkImageViewCreateInfo viewInfo = vks::initializers::imageViewCreateInfo();
-		viewInfo.image = shadowMap.image;
+		viewInfo.image = shadowMapAttachment.image;
 		viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
 		viewInfo.format = shadowMapFormat;
 		viewInfo.subresourceRange = { VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1 };
-		VK_CHECK_RESULT(vkCreateImageView(device, &viewInfo, nullptr, &shadowMap.view));
+		VK_CHECK_RESULT(vkCreateImageView(device, &viewInfo, nullptr, &shadowMapAttachment.view));
 	}
 
 	void loadAssets()
@@ -137,10 +137,10 @@ public:
 		// Sets per frame, just like the buffers themselves
 		VkDescriptorSetAllocateInfo allocInfo = vks::initializers::descriptorSetAllocateInfo(descriptorPool, &descriptorSetLayout, 1);
 		for (auto i = 0; i < uniformBuffers.size(); i++) {
-			VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &descriptorSets[i]));
+			VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &descriptorSets[i].depthMap));
 			std::vector<VkWriteDescriptorSet> writeDescriptorSets = {
 				// Binding 0 : Vertex shader uniform buffer
-				vks::initializers::writeDescriptorSet(descriptorSets[i]., VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &uniformBuffers[i]..descriptor)
+				vks::initializers::writeDescriptorSet(descriptorSets[i].depthMap, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &uniformBuffers[i].depthMap.descriptor)
 			};
 			vkUpdateDescriptorSets(device, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, nullptr);
 		}
@@ -150,10 +150,10 @@ public:
 	{
 		// Rendering Info
 		VkPipelineRenderingCreateInfo pipelineRenderingInfo = vks::initializers::pipelineRenderingCreateInfo();
-		pipelineRenderingInfo.colorAttachmentCount = 1;
-		pipelineRenderingInfo.pColorAttachmentFormats = &swapChain.colorFormat;
-		pipelineRenderingInfo.depthAttachmentFormat = depthFormat;
-		pipelineRenderingInfo.stencilAttachmentFormat = depthFormat;
+		pipelineRenderingInfo.colorAttachmentCount = 0;
+		pipelineRenderingInfo.pColorAttachmentFormats = nullptr;
+		pipelineRenderingInfo.depthAttachmentFormat = shadowMapFormat;
+		pipelineRenderingInfo.stencilAttachmentFormat = VK_FORMAT_UNDEFINED;
 
 		// shader stages
 		std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages =
@@ -192,7 +192,7 @@ public:
 		pipelineCI.pDynamicState = &dynamicState;
 		pipelineCI.layout = pipelineLayout;
 
-		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCI, nullptr, &pipelines.shadowDepth));
+		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCI, nullptr, &pipelines.depthMap));
 	}
 
 	void prepareUniformBuffers()
@@ -249,15 +249,21 @@ public:
 				VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
 				{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 });
 
+			vks::tools::insertImageMemoryBarrier2(cmdBuffer, shadowMapAttachment.image,
+				0, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+				VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+				VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
+				{ VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1 });
+
 			VkRenderingAttachmentInfo depthStencilAttachment = vks::initializers::renderingAttachmentInfo();
-			depthStencilAttachment.imageView = depthStencil.view;
+			depthStencilAttachment.imageView = shadowMapAttachment.view;
 			depthStencilAttachment.imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL;
 			depthStencilAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
 			depthStencilAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
 			depthStencilAttachment.clearValue = { 1.0f, 0 };
 
 			VkRenderingInfo renderingInfo = vks::initializers::renderingInfo();
-			renderingInfo.renderArea.extent = { shadowMap.width, shadowMap.height };
+			renderingInfo.renderArea.extent = { shadowMapAttachment.width, shadowMapAttachment.height };
 			renderingInfo.layerCount = 1;
 			renderingInfo.colorAttachmentCount = 0;
 			renderingInfo.pColorAttachments = nullptr;
@@ -265,12 +271,12 @@ public:
 
 			vkCmdBeginRendering(cmdBuffer, &renderingInfo);
 
-			VkViewport viewport = vks::initializers::viewport((float)shadowMap.width, (float)shadowMap.height, 0.0f, 1.0f);
+			VkViewport viewport = vks::initializers::viewport((float)shadowMapAttachment.width, (float)shadowMapAttachment.height, 0.0f, 1.0f);
 			vkCmdSetViewport(cmdBuffer, 0, 1, &viewport);
-			VkRect2D scissor = vks::initializers::rect2D(shadowMap.width, shadowMap.height, 0, 0);
+			VkRect2D scissor = vks::initializers::rect2D(shadowMapAttachment.width, shadowMapAttachment.height, 0, 0);
 			vkCmdSetScissor(cmdBuffer, 0, 1, &scissor);
 
-			vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentBuffer], 0, nullptr);
+			vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentBuffer].depthMap, 0, nullptr);
 			scenes[0].bindBuffers(cmdBuffer);
 			
 			vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.depthMap);
@@ -279,10 +285,11 @@ public:
 
 			scenes[0].draw(cmdBuffer);
 			
+			
 			vkCmdEndRendering(cmdBuffer);
 		}
 
-		drawUI(cmdBuffer);
+			//drawUI(cmdBuffer);
 
 		vks::tools::insertImageMemoryBarrier2(cmdBuffer, swapChain.images[currentImageIndex],
 			VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, 0,
@@ -298,6 +305,10 @@ public:
 		if (!prepared)
 			return;
 		VulkanExampleBase::prepareFrame();
+		if (!paused || camera.updated)
+		{
+			updateLight();
+		}
 		updateUniformBuffers();
 		buildCommandBuffer();
 		VulkanExampleBase::submitFrame();
