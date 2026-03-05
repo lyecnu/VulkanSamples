@@ -42,6 +42,9 @@ function(buildExample EXAMPLE_NAME)
 			if(EXAMPLE_NAME IN_LIST EXAMPLES_BASE)
 				set_target_properties(${EXAMPLE_NAME} PROPERTIES FOLDER "basics")
 			endif()
+			if(EXAMPLE_NAME IN_LIST EXAMPLES_GAMES202)
+				set_target_properties(${EXAMPLE_NAME} PROPERTIES FOLDER "GAMES202")
+			endif()
 			# Add more groups as needed, e.g.:
 			# if(EXAMPLE_NAME IN_LIST EXAMPLES_GAMES106)
 			#     set_target_properties(${EXAMPLE_NAME} PROPERTIES FOLDER "samples/games106")
@@ -110,12 +113,17 @@ set(EXAMPLES_BASE
 	stencilbuffer
 )
 
+set(EXAMPLES_GAMES202
+	shadowmapping
+)
+
 # Reserved: add more groups later, e.g. GAMES106
 # set(EXAMPLES_GAMES106 xxx)
 
 # Collect all group examples
 set(EXAMPLES
 	${EXAMPLES_BASE}
+	${EXAMPLES_GAMES202}
 	# ${EXAMPLES_GAMES106}
 )
 
