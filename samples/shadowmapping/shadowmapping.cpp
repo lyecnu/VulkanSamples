@@ -17,7 +17,7 @@ public:
 	struct
 	{
 		glm::mat4 depthMVP;
-	} shadowMapData;
+	} depthMapData;
 
 	struct UniformData {
 		glm::mat4 projection;
@@ -32,15 +32,24 @@ public:
 	};
 	std::array<UniformBuffers, maxConcurrentFrames> uniformBuffers;
 
-	VkPipelineLayout pipelineLayout{ VK_NULL_HANDLE };
-	VkDescriptorSetLayout descriptorSetLayout{ VK_NULL_HANDLE };
+	struct
+	{
+		VkDescriptorSetLayout depthMap{ VK_NULL_HANDLE };
+		VkDescriptorSetLayout scene{ VK_NULL_HANDLE };
+	} descriptorSetLayouts;
 
 	struct DescriptorSets
 	{
 		VkDescriptorSet depthMap;
+		VkDescriptorSet scene;
 	};
 	std::array<DescriptorSets, maxConcurrentFrames> descriptorSets{};
 
+	struct
+	{
+		VkPipelineLayout depthMap{ VK_NULL_HANDLE };
+		VkPipelineLayout scene{ VK_NULL_HANDLE };
+	} pipelineLayouts;
 	struct
 	{
 		VkPipeline depthMap{ VK_NULL_HANDLE };
@@ -53,9 +62,11 @@ public:
 		VkImage image{ VK_NULL_HANDLE };
 		VkImageView view{ VK_NULL_HANDLE };
 		VkDeviceMemory memory{ VK_NULL_HANDLE };
-	} shadowMapAttachment;
+		VkSampler sampler{ VK_NULL_HANDLE };
+		VkDescriptorImageInfo descriptor{ VK_NULL_HANDLE };
+	} depthMapAttachment;
 
-	const VkFormat shadowMapFormat{ VK_FORMAT_D16_UNORM };
+	const VkFormat depthMapFormat{ VK_FORMAT_D16_UNORM };
 
 	VulkanExample() : VulkanExampleBase()
 	{
@@ -79,34 +90,50 @@ public:
 	//	}
 	//}
 
-	void prepareShadowMap()
+	void createShadowMap()
 	{
 		VkImageCreateInfo imageInfo = vks::initializers::imageCreateInfo();
 		imageInfo.imageType = VK_IMAGE_TYPE_2D;
-		imageInfo.format = shadowMapFormat;
-		imageInfo.extent = { shadowMapAttachment.width, shadowMapAttachment.height, 1 };
+		imageInfo.format = depthMapFormat;
+		imageInfo.extent = { depthMapAttachment.width, depthMapAttachment.height, 1 };
 		imageInfo.mipLevels = 1;
 		imageInfo.arrayLayers = 1;
 		imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
 		imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
 		imageInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
 		imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-		VK_CHECK_RESULT(vkCreateImage(device, &imageInfo, nullptr, &shadowMapAttachment.image));
+		VK_CHECK_RESULT(vkCreateImage(device, &imageInfo, nullptr, &depthMapAttachment.image));
 
 		VkMemoryAllocateInfo memAllocInfo = vks::initializers::memoryAllocateInfo();
 		VkMemoryRequirements memReqs;
-		vkGetImageMemoryRequirements(device, shadowMapAttachment.image, &memReqs);
+		vkGetImageMemoryRequirements(device, depthMapAttachment.image, &memReqs);
 		memAllocInfo.allocationSize = memReqs.size;
 		memAllocInfo.memoryTypeIndex = vulkanDevice->getMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-		VK_CHECK_RESULT(vkAllocateMemory(device, &memAllocInfo, nullptr, &shadowMapAttachment.memory));
-		VK_CHECK_RESULT(vkBindImageMemory(device, shadowMapAttachment.image, shadowMapAttachment.memory, 0));
+		VK_CHECK_RESULT(vkAllocateMemory(device, &memAllocInfo, nullptr, &depthMapAttachment.memory));
+		VK_CHECK_RESULT(vkBindImageMemory(device, depthMapAttachment.image, depthMapAttachment.memory, 0));
 
 		VkImageViewCreateInfo viewInfo = vks::initializers::imageViewCreateInfo();
-		viewInfo.image = shadowMapAttachment.image;
+		viewInfo.image = depthMapAttachment.image;
 		viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-		viewInfo.format = shadowMapFormat;
+		viewInfo.format = depthMapFormat;
 		viewInfo.subresourceRange = { VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1 };
-		VK_CHECK_RESULT(vkCreateImageView(device, &viewInfo, nullptr, &shadowMapAttachment.view));
+		VK_CHECK_RESULT(vkCreateImageView(device, &viewInfo, nullptr, &depthMapAttachment.view));
+
+		VkSamplerCreateInfo samplerInfo = vks::initializers::samplerCreateInfo();
+		samplerInfo.magFilter = VK_FILTER_LINEAR;
+		samplerInfo.minFilter = VK_FILTER_LINEAR;
+		samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+		samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+		samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+		samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+		samplerInfo.mipLodBias = 0.0f;
+		samplerInfo.maxAnisotropy = 1.0f;
+		samplerInfo.minLod = 0.0f;
+		samplerInfo.maxLod = 1.0f;
+		samplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
+		VK_CHECK_RESULT(vkCreateSampler(device, &samplerInfo, nullptr, &depthMapAttachment.sampler));
+
+		depthMapAttachment.descriptor = vks::initializers::descriptorImageInfo(depthMapAttachment.sampler, depthMapAttachment.view, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
 	}
 
 	void loadAssets()
@@ -121,26 +148,49 @@ public:
 	{
 		// Pool
 		std::vector<VkDescriptorPoolSize> poolSizes = {
-			vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, maxConcurrentFrames)
+			vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, maxConcurrentFrames * 2),
+			vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, maxConcurrentFrames)
 		};
-		VkDescriptorPoolCreateInfo descriptorPoolInfo = vks::initializers::descriptorPoolCreateInfo(poolSizes, maxConcurrentFrames);
+		VkDescriptorPoolCreateInfo descriptorPoolInfo = vks::initializers::descriptorPoolCreateInfo(poolSizes, maxConcurrentFrames * 2);
 		VK_CHECK_RESULT(vkCreateDescriptorPool(device, &descriptorPoolInfo, nullptr, &descriptorPool));
 
-		// Layout
+		// Depth Map Pass Layout
 		std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {
 			// Binding 0 : Vertex shader uniform buffer
-			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, 0)
+			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, 0),
 		};
 		VkDescriptorSetLayoutCreateInfo descriptorLayout = vks::initializers::descriptorSetLayoutCreateInfo(setLayoutBindings);
-		VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayout, nullptr, &descriptorSetLayout));
+		VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayout, nullptr, &descriptorSetLayouts.depthMap));
+
+		// Scene Pass Layout
+		setLayoutBindings = {
+			// Binding 0 : Vertex shader uniform buffer
+			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, 0),
+			// Binding 1 : shadow map sampler
+			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 1)
+		};
+		VkDescriptorSetLayoutCreateInfo descriptorLayout = vks::initializers::descriptorSetLayoutCreateInfo(setLayoutBindings);
+		VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayout, nullptr, &descriptorSetLayouts.scene));
 
 		// Sets per frame, just like the buffers themselves
-		VkDescriptorSetAllocateInfo allocInfo = vks::initializers::descriptorSetAllocateInfo(descriptorPool, &descriptorSetLayout, 1);
 		for (auto i = 0; i < uniformBuffers.size(); i++) {
+			// Depth map descriptor set
+			VkDescriptorSetAllocateInfo allocInfo = vks::initializers::descriptorSetAllocateInfo(descriptorPool, &descriptorSetLayouts.depthMap, 1);
 			VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &descriptorSets[i].depthMap));
 			std::vector<VkWriteDescriptorSet> writeDescriptorSets = {
-				// Binding 0 : Vertex shader uniform buffer
-				vks::initializers::writeDescriptorSet(descriptorSets[i].depthMap, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &uniformBuffers[i].depthMap.descriptor)
+				// Binding 0 : Light MVP uniform buffer
+				vks::initializers::writeDescriptorSet(descriptorSets[i].depthMap, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &uniformBuffers[i].depthMap.descriptor),
+			};
+			vkUpdateDescriptorSets(device, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, nullptr);
+
+			// Scene descriptor set
+			allocInfo = vks::initializers::descriptorSetAllocateInfo(descriptorPool, &descriptorSetLayouts.scene, 1);
+			VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &descriptorSets[i].scene));
+			writeDescriptorSets = {
+				// Binding 0 : Scene uniform buffer
+				vks::initializers::writeDescriptorSet(descriptorSets[i].scene, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &uniformBuffers[i].scene.descriptor),
+				// Binding 1 : Shadow map sampler
+				vks::initializers::writeDescriptorSet(descriptorSets[i].scene, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, &depthMapAttachment.descriptor)
 			};
 			vkUpdateDescriptorSets(device, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, nullptr);
 		}
@@ -148,24 +198,6 @@ public:
 
 	void preparePipelines()
 	{
-		// Rendering Info
-		VkPipelineRenderingCreateInfo pipelineRenderingInfo = vks::initializers::pipelineRenderingCreateInfo();
-		pipelineRenderingInfo.colorAttachmentCount = 0;
-		pipelineRenderingInfo.pColorAttachmentFormats = nullptr;
-		pipelineRenderingInfo.depthAttachmentFormat = shadowMapFormat;
-		pipelineRenderingInfo.stencilAttachmentFormat = VK_FORMAT_UNDEFINED;
-
-		// shader stages
-		std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages =
-		{
-			loadShader(getShadersPath() + "shadowmapping/depthMap.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
-			loadShader(getShadersPath() + "shadowmapping/depthMap.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT)
-		};
-
-		// Layout
-		VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = vks::initializers::pipelineLayoutCreateInfo(&descriptorSetLayout, 1);
-		VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, nullptr, &pipelineLayout));
-
 		// Most state is shared between all pipelines
 		VkPipelineInputAssemblyStateCreateInfo inputAssemblyState = vks::initializers::pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, VK_FALSE);
 		VkPipelineRasterizationStateCreateInfo rasterizationState = vks::initializers::pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_COUNTER_CLOCKWISE, 0);
@@ -177,22 +209,64 @@ public:
 		std::vector<VkDynamicState> dynamicStateEnables = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_LINE_WIDTH, };
 		VkPipelineDynamicStateCreateInfo dynamicState = vks::initializers::pipelineDynamicStateCreateInfo(dynamicStateEnables);
 
+		// 1. Depth map pipeline
+
+		// Rendering Info
+		VkPipelineRenderingCreateInfo pipelineRenderingInfo = vks::initializers::pipelineRenderingCreateInfo();
+		pipelineRenderingInfo.colorAttachmentCount = 0;
+		pipelineRenderingInfo.pColorAttachmentFormats = nullptr;
+		pipelineRenderingInfo.depthAttachmentFormat = depthMapFormat;
+		pipelineRenderingInfo.stencilAttachmentFormat = VK_FORMAT_UNDEFINED;
+
+		// shader stages
+		std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages =
+		{
+			loadShader(getShadersPath() + "shadowmapping/depthMap.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
+			loadShader(getShadersPath() + "shadowmapping/depthMap.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT)
+		};
+
+		// Layout
+		VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = vks::initializers::pipelineLayoutCreateInfo(&descriptorSetLayouts.depthMap, 1);
+		VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, nullptr, &pipelineLayouts.depthMap));
 
 		VkGraphicsPipelineCreateInfo pipelineCI = vks::initializers::pipelineCreateInfo();
 		pipelineCI.pNext = &pipelineRenderingInfo;
 		pipelineCI.stageCount = static_cast<uint32_t>(shaderStages.size());
 		pipelineCI.pStages = shaderStages.data();
-		pipelineCI.pVertexInputState = vkglTF::Vertex::getPipelineVertexInputState({ vkglTF::VertexComponent::Position, vkglTF::VertexComponent::Normal, vkglTF::VertexComponent::Color });
+		pipelineCI.pVertexInputState = vkglTF::Vertex::getPipelineVertexInputState({ vkglTF::VertexComponent::Position });
 		pipelineCI.pInputAssemblyState = &inputAssemblyState;
 		pipelineCI.pViewportState = &viewportState;
 		pipelineCI.pRasterizationState = &rasterizationState;
 		pipelineCI.pMultisampleState = &multisampleState;
 		pipelineCI.pDepthStencilState = &depthStencilState;
-		pipelineCI.pColorBlendState = &colorBlendState;
+		pipelineCI.pColorBlendState = nullptr;
 		pipelineCI.pDynamicState = &dynamicState;
-		pipelineCI.layout = pipelineLayout;
+		pipelineCI.layout = pipelineLayouts.depthMap;
 
 		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCI, nullptr, &pipelines.depthMap));
+	
+		// 2. Scene rendering pipeline
+		pipelineRenderingInfo.colorAttachmentCount = 1;
+		pipelineRenderingInfo.pColorAttachmentFormats = &swapChain.colorFormat;
+		pipelineRenderingInfo.depthAttachmentFormat = depthFormat;
+		pipelineRenderingInfo.stencilAttachmentFormat = depthFormat;
+
+		shaderStages = 
+		{
+			loadShader(getShadersPath() + "shadowmapping/scene.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
+			loadShader(getShadersPath() + "shadowmapping/scene.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT)
+		};
+
+		pipelineLayoutCreateInfo = vks::initializers::pipelineLayoutCreateInfo(&descriptorSetLayouts.scene, 1);
+		VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, nullptr, &pipelineLayouts.scene));
+
+		pipelineCI.pNext = &pipelineRenderingInfo;
+		pipelineCI.pStages = shaderStages.data();
+		pipelineCI.pVertexInputState = vkglTF::Vertex::getPipelineVertexInputState({ vkglTF::VertexComponent::Position, vkglTF::VertexComponent::Normal, vkglTF::VertexComponent::Color });
+		pipelineCI.pColorBlendState = &colorBlendState;
+		pipelineCI.layout = pipelineLayouts.scene;
+
+		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCI, nullptr, &pipelines.scene));
 	}
 
 	void prepareUniformBuffers()
@@ -240,30 +314,24 @@ public:
 		VK_CHECK_RESULT(vkBeginCommandBuffer(cmdBuffer, &cmdBufInfo));
 
 		/*
-			First render pass: Generate shadow map by rendering the scene from light's POV
+			First pass: Generate shadow map by rendering the scene from light's POV
 		*/
 		{
-			vks::tools::insertImageMemoryBarrier2(cmdBuffer, swapChain.images[currentImageIndex],
-				0, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-				VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-				VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-				{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 });
-
-			vks::tools::insertImageMemoryBarrier2(cmdBuffer, shadowMapAttachment.image,
+			vks::tools::insertImageMemoryBarrier2(cmdBuffer, depthMapAttachment.image,
 				0, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
 				VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
 				VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
 				{ VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1 });
 
 			VkRenderingAttachmentInfo depthStencilAttachment = vks::initializers::renderingAttachmentInfo();
-			depthStencilAttachment.imageView = shadowMapAttachment.view;
+			depthStencilAttachment.imageView = depthMapAttachment.view;
 			depthStencilAttachment.imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL;
 			depthStencilAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
 			depthStencilAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
 			depthStencilAttachment.clearValue = { 1.0f, 0 };
 
 			VkRenderingInfo renderingInfo = vks::initializers::renderingInfo();
-			renderingInfo.renderArea.extent = { shadowMapAttachment.width, shadowMapAttachment.height };
+			renderingInfo.renderArea.extent = { depthMapAttachment.width, depthMapAttachment.height };
 			renderingInfo.layerCount = 1;
 			renderingInfo.colorAttachmentCount = 0;
 			renderingInfo.pColorAttachments = nullptr;
@@ -271,9 +339,9 @@ public:
 
 			vkCmdBeginRendering(cmdBuffer, &renderingInfo);
 
-			VkViewport viewport = vks::initializers::viewport((float)shadowMapAttachment.width, (float)shadowMapAttachment.height, 0.0f, 1.0f);
+			VkViewport viewport = vks::initializers::viewport((float)depthMapAttachment.width, (float)depthMapAttachment.height, 0.0f, 1.0f);
 			vkCmdSetViewport(cmdBuffer, 0, 1, &viewport);
-			VkRect2D scissor = vks::initializers::rect2D(shadowMapAttachment.width, shadowMapAttachment.height, 0, 0);
+			VkRect2D scissor = vks::initializers::rect2D(depthMapAttachment.width, depthMapAttachment.height, 0, 0);
 			vkCmdSetScissor(cmdBuffer, 0, 1, &scissor);
 
 			vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentBuffer].depthMap, 0, nullptr);
@@ -288,7 +356,56 @@ public:
 			
 			vkCmdEndRendering(cmdBuffer);
 		}
+		/*
+			Second pass: Scene rendering with applied shadow map
+		*/
+		{
+			vks::tools::insertImageMemoryBarrier2(cmdBuffer, swapChain.images[currentImageIndex],
+				0, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+				VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+				VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+				{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 });
 
+			VkRenderingAttachmentInfo colorAttachment = vks::initializers::renderingAttachmentInfo();
+			colorAttachment.imageView = swapChain.imageViews[currentImageIndex];
+			colorAttachment.imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL;
+			colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+			colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+			colorAttachment.clearValue.color = defaultClearColor;
+
+			//VkRenderingAttachmentInfo depthStencilAttachment = vks::initializers::renderingAttachmentInfo();
+			//depthStencilAttachment.imageView = depthStencil.view;
+			//depthStencilAttachment.imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL;
+			//depthStencilAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+			//depthStencilAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+			//depthStencilAttachment.clearValue = { 1.0f, 0 };
+
+			VkRenderingInfo renderingInfo = vks::initializers::renderingInfo();
+			renderingInfo.renderArea.extent = { width, height };
+			renderingInfo.layerCount = 1;
+			renderingInfo.colorAttachmentCount = 1;
+			renderingInfo.pColorAttachments = &colorAttachment;
+			renderingInfo.pDepthAttachment = nullptr;
+
+			vkCmdBeginRendering(cmdBuffer, &renderingInfo);
+
+			VkViewport viewport = vks::initializers::viewport((float)width, (float)height, 0.0f, 1.0f);
+			vkCmdSetViewport(cmdBuffer, 0, 1, &viewport);
+			VkRect2D scissor = vks::initializers::rect2D(width, height, 0, 0);
+			vkCmdSetScissor(cmdBuffer, 0, 1, &scissor);
+
+			vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentBuffer].scene, 0, nullptr);
+			scenes[0].bindBuffers(cmdBuffer);
+
+			vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.scene);
+
+			scenes[0].bindBuffers(cmdBuffer);
+
+			scenes[0].draw(cmdBuffer);
+
+
+			vkCmdEndRendering(cmdBuffer);
+		}
 			//drawUI(cmdBuffer);
 
 		vks::tools::insertImageMemoryBarrier2(cmdBuffer, swapChain.images[currentImageIndex],
