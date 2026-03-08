@@ -6,6 +6,8 @@
 class VulkanExample : public VulkanExampleBase
 {
 public:
+	float depthBiasConstant = 1.25f;
+	float depthBiasSlope = 1.75f;
 	float zNear = 1.0f;
 	float zFar = 256.0f;
 
@@ -16,14 +18,16 @@ public:
 
 	struct
 	{
-		glm::mat4 depthMVP;
+		glm::mat4 lightSpaceMVP;
 	} depthMapData;
 
-	struct UniformData {
+	struct
+	{
 		glm::mat4 projection;
 		glm::mat4 view;
-		glm::vec4 lightPos{ 0.0f, 2.0f, 1.0f, 0.0f };
-	} uniformData;
+		glm::mat4 lightSpaceMVP;
+		glm::vec4 lightPos;
+	} sceneData;
 
 	struct UniformBuffers
 	{
@@ -77,18 +81,27 @@ public:
 		camera.setPerspective(60.0f, (float)width / (float)height, 1.0f, 256.0f);
 	}
 
-	//~VulkanExample()
-	//{
-	//	if (device)
-	//	{
-	//		vkDestroyPipeline(device, pipeline, nullptr);
-	//		vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
-	//		vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
-	//		for (auto& buffer : uniformBuffers) {
-	//			buffer.destroy();
-	//		}
-	//	}
-	//}
+	~VulkanExample()
+	{
+		if (device)
+		{
+			vkDestroySampler(device, depthMapAttachment.sampler, nullptr);
+			vkDestroyImage(device, depthMapAttachment.image, nullptr);
+			vkDestroyImageView(device, depthMapAttachment.view, nullptr);
+			vkFreeMemory(device, depthMapAttachment.memory, nullptr);
+			vkDestroyPipeline(device, pipelines.depthMap, nullptr);
+			vkDestroyPipeline(device, pipelines.scene, nullptr);
+			vkDestroyPipelineLayout(device, pipelineLayouts.depthMap, nullptr);
+			vkDestroyPipelineLayout(device, pipelineLayouts.scene, nullptr);
+			vkDestroyDescriptorSetLayout(device, descriptorSetLayouts.depthMap, nullptr);
+			vkDestroyDescriptorSetLayout(device, descriptorSetLayouts.scene, nullptr);
+			for (auto& buffer : uniformBuffers)
+			{
+				buffer.depthMap.destroy();
+				buffer.scene.destroy();
+			}
+		}
+	}
 
 	void createShadowMap()
 	{
@@ -133,7 +146,7 @@ public:
 		samplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
 		VK_CHECK_RESULT(vkCreateSampler(device, &samplerInfo, nullptr, &depthMapAttachment.sampler));
 
-		depthMapAttachment.descriptor = vks::initializers::descriptorImageInfo(depthMapAttachment.sampler, depthMapAttachment.view, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
+		depthMapAttachment.descriptor = vks::initializers::descriptorImageInfo(depthMapAttachment.sampler, depthMapAttachment.view, VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL);
 	}
 
 	void loadAssets()
@@ -169,7 +182,7 @@ public:
 			// Binding 1 : shadow map sampler
 			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 1)
 		};
-		VkDescriptorSetLayoutCreateInfo descriptorLayout = vks::initializers::descriptorSetLayoutCreateInfo(setLayoutBindings);
+		descriptorLayout = vks::initializers::descriptorSetLayoutCreateInfo(setLayoutBindings);
 		VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayout, nullptr, &descriptorSetLayouts.scene));
 
 		// Sets per frame, just like the buffers themselves
@@ -209,71 +222,79 @@ public:
 		std::vector<VkDynamicState> dynamicStateEnables = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_LINE_WIDTH, };
 		VkPipelineDynamicStateCreateInfo dynamicState = vks::initializers::pipelineDynamicStateCreateInfo(dynamicStateEnables);
 
+		// 2. Scene rendering pipeline
+		VkPipelineRenderingCreateInfo pipelineRenderingInfo = vks::initializers::pipelineRenderingCreateInfo();
+		pipelineRenderingInfo.colorAttachmentCount = 1;
+		pipelineRenderingInfo.pColorAttachmentFormats = &swapChain.colorFormat;
+		pipelineRenderingInfo.depthAttachmentFormat = depthFormat;
+		pipelineRenderingInfo.stencilAttachmentFormat = VK_FORMAT_UNDEFINED;
+
+		std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages =
+		{
+			loadShader(getShadersPath() + "shadowmapping/scene.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
+			loadShader(getShadersPath() + "shadowmapping/scene.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT)
+		};
+
+		VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = vks::initializers::pipelineLayoutCreateInfo(&descriptorSetLayouts.scene, 1);
+		VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, nullptr, &pipelineLayouts.scene));
+
+		VkGraphicsPipelineCreateInfo pipelineCI = vks::initializers::pipelineCreateInfo();
+		pipelineCI.pNext = &pipelineRenderingInfo;
+		pipelineCI.stageCount = static_cast<uint32_t>(shaderStages.size());
+		pipelineCI.pStages = shaderStages.data();
+		pipelineCI.pVertexInputState = vkglTF::Vertex::getPipelineVertexInputState({ vkglTF::VertexComponent::Position, vkglTF::VertexComponent::Normal, vkglTF::VertexComponent::Color });
+		pipelineCI.pInputAssemblyState = &inputAssemblyState;
+		pipelineCI.pViewportState = &viewportState;
+		pipelineCI.pRasterizationState = &rasterizationState;
+		pipelineCI.pMultisampleState = &multisampleState;
+		pipelineCI.pDepthStencilState = &depthStencilState;
+		pipelineCI.pColorBlendState = &colorBlendState;
+		pipelineCI.pDynamicState = &dynamicState;
+		pipelineCI.layout = pipelineLayouts.scene;
+
+		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCI, nullptr, &pipelines.scene));
+
 		// 1. Depth map pipeline
 
 		// Rendering Info
-		VkPipelineRenderingCreateInfo pipelineRenderingInfo = vks::initializers::pipelineRenderingCreateInfo();
 		pipelineRenderingInfo.colorAttachmentCount = 0;
 		pipelineRenderingInfo.pColorAttachmentFormats = nullptr;
 		pipelineRenderingInfo.depthAttachmentFormat = depthMapFormat;
 		pipelineRenderingInfo.stencilAttachmentFormat = VK_FORMAT_UNDEFINED;
 
 		// shader stages
-		std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages =
+		shaderStages =
 		{
 			loadShader(getShadersPath() + "shadowmapping/depthMap.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
 			loadShader(getShadersPath() + "shadowmapping/depthMap.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT)
 		};
 
 		// Layout
-		VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = vks::initializers::pipelineLayoutCreateInfo(&descriptorSetLayouts.depthMap, 1);
+		pipelineLayoutCreateInfo = vks::initializers::pipelineLayoutCreateInfo(&descriptorSetLayouts.depthMap, 1);
 		VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, nullptr, &pipelineLayouts.depthMap));
 
-		VkGraphicsPipelineCreateInfo pipelineCI = vks::initializers::pipelineCreateInfo();
+		rasterizationState.depthBiasEnable = VK_TRUE;
+		dynamicStateEnables.push_back(VK_DYNAMIC_STATE_DEPTH_BIAS);
+		dynamicState = vks::initializers::pipelineDynamicStateCreateInfo(dynamicStateEnables);
+
 		pipelineCI.pNext = &pipelineRenderingInfo;
 		pipelineCI.stageCount = static_cast<uint32_t>(shaderStages.size());
 		pipelineCI.pStages = shaderStages.data();
 		pipelineCI.pVertexInputState = vkglTF::Vertex::getPipelineVertexInputState({ vkglTF::VertexComponent::Position });
-		pipelineCI.pInputAssemblyState = &inputAssemblyState;
-		pipelineCI.pViewportState = &viewportState;
 		pipelineCI.pRasterizationState = &rasterizationState;
-		pipelineCI.pMultisampleState = &multisampleState;
-		pipelineCI.pDepthStencilState = &depthStencilState;
-		pipelineCI.pColorBlendState = nullptr;
 		pipelineCI.pDynamicState = &dynamicState;
 		pipelineCI.layout = pipelineLayouts.depthMap;
 
 		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCI, nullptr, &pipelines.depthMap));
-	
-		// 2. Scene rendering pipeline
-		pipelineRenderingInfo.colorAttachmentCount = 1;
-		pipelineRenderingInfo.pColorAttachmentFormats = &swapChain.colorFormat;
-		pipelineRenderingInfo.depthAttachmentFormat = depthFormat;
-		pipelineRenderingInfo.stencilAttachmentFormat = depthFormat;
-
-		shaderStages = 
-		{
-			loadShader(getShadersPath() + "shadowmapping/scene.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
-			loadShader(getShadersPath() + "shadowmapping/scene.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT)
-		};
-
-		pipelineLayoutCreateInfo = vks::initializers::pipelineLayoutCreateInfo(&descriptorSetLayouts.scene, 1);
-		VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, nullptr, &pipelineLayouts.scene));
-
-		pipelineCI.pNext = &pipelineRenderingInfo;
-		pipelineCI.pStages = shaderStages.data();
-		pipelineCI.pVertexInputState = vkglTF::Vertex::getPipelineVertexInputState({ vkglTF::VertexComponent::Position, vkglTF::VertexComponent::Normal, vkglTF::VertexComponent::Color });
-		pipelineCI.pColorBlendState = &colorBlendState;
-		pipelineCI.layout = pipelineLayouts.scene;
-
-		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCI, nullptr, &pipelines.scene));
 	}
 
 	void prepareUniformBuffers()
 	{
 		for (auto& buffer : uniformBuffers) {
-			VK_CHECK_RESULT(vulkanDevice->createBuffer(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &buffer.depthMap, sizeof(shadowMapData)));
+			VK_CHECK_RESULT(vulkanDevice->createBuffer(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &buffer.depthMap, sizeof(depthMapData)));
 			VK_CHECK_RESULT(buffer.depthMap.map());
+			VK_CHECK_RESULT(vulkanDevice->createBuffer(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &buffer.scene, sizeof(sceneData)));
+			VK_CHECK_RESULT(buffer.scene.map());
 		}
 	}
 
@@ -287,18 +308,25 @@ public:
 
 	void updateUniformBuffers()
 	{
+		// Matrix from light's point of view for generating the shadow map
 		glm::mat4 lightProjection = glm::perspective(glm::radians(lightFov), 1.0f, zNear, zFar);
 		glm::mat4 lightView = glm::lookAt(lightPos, glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
 		glm::mat4 lightModel = glm::mat4(1.0f);
-		shadowMapData.depthMVP = lightProjection * lightView * lightModel;
-		memcpy(uniformBuffers[currentBuffer].depthMap.mapped, &shadowMapData, sizeof(shadowMapData));
+		depthMapData.lightSpaceMVP = lightProjection * lightView * lightModel;
+		memcpy(uniformBuffers[currentBuffer].depthMap.mapped, &depthMapData, sizeof(depthMapData));
+		// Uniform data for drawing the scene
+		sceneData.projection = camera.matrices.perspective;
+		sceneData.view = camera.matrices.view;
+		sceneData.lightSpaceMVP = depthMapData.lightSpaceMVP;
+		sceneData.lightPos = glm::vec4(lightPos, 1.0f);
+		memcpy(uniformBuffers[currentBuffer].scene.mapped, &sceneData, sizeof(sceneData));
 	}
 
 	void prepare()
 	{
 		VulkanExampleBase::prepare();
 		loadAssets();
-		prepareShadowMap();
+		createShadowMap();
 		prepareUniformBuffers();
 		setupDescriptors();
 		preparePipelines();
@@ -327,7 +355,7 @@ public:
 			depthStencilAttachment.imageView = depthMapAttachment.view;
 			depthStencilAttachment.imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL;
 			depthStencilAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-			depthStencilAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+			depthStencilAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
 			depthStencilAttachment.clearValue = { 1.0f, 0 };
 
 			VkRenderingInfo renderingInfo = vks::initializers::renderingInfo();
@@ -344,17 +372,21 @@ public:
 			VkRect2D scissor = vks::initializers::rect2D(depthMapAttachment.width, depthMapAttachment.height, 0, 0);
 			vkCmdSetScissor(cmdBuffer, 0, 1, &scissor);
 
-			vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentBuffer].depthMap, 0, nullptr);
-			scenes[0].bindBuffers(cmdBuffer);
-			
+			vkCmdSetDepthBias(cmdBuffer, depthBiasConstant, 0.0f, depthBiasSlope);
+
+			vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayouts.depthMap, 0, 1, &descriptorSets[currentBuffer].depthMap, 0, nullptr);
 			vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.depthMap);
 			
 			scenes[0].bindBuffers(cmdBuffer);
-
 			scenes[0].draw(cmdBuffer);
 			
-			
 			vkCmdEndRendering(cmdBuffer);
+
+			vks::tools::insertImageMemoryBarrier2(cmdBuffer, depthMapAttachment.image,
+				VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
+				VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL,
+				VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+				{ VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1 });
 		}
 		/*
 			Second pass: Scene rendering with applied shadow map
@@ -373,19 +405,19 @@ public:
 			colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
 			colorAttachment.clearValue.color = defaultClearColor;
 
-			//VkRenderingAttachmentInfo depthStencilAttachment = vks::initializers::renderingAttachmentInfo();
-			//depthStencilAttachment.imageView = depthStencil.view;
-			//depthStencilAttachment.imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL;
-			//depthStencilAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-			//depthStencilAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-			//depthStencilAttachment.clearValue = { 1.0f, 0 };
+			VkRenderingAttachmentInfo depthStencilAttachment = vks::initializers::renderingAttachmentInfo();
+			depthStencilAttachment.imageView = depthStencil.view;
+			depthStencilAttachment.imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL;
+			depthStencilAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+			depthStencilAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+			depthStencilAttachment.clearValue = { 1.0f, 0 };
 
 			VkRenderingInfo renderingInfo = vks::initializers::renderingInfo();
 			renderingInfo.renderArea.extent = { width, height };
 			renderingInfo.layerCount = 1;
 			renderingInfo.colorAttachmentCount = 1;
 			renderingInfo.pColorAttachments = &colorAttachment;
-			renderingInfo.pDepthAttachment = nullptr;
+			renderingInfo.pDepthAttachment = &depthStencilAttachment;
 
 			vkCmdBeginRendering(cmdBuffer, &renderingInfo);
 
@@ -394,25 +426,22 @@ public:
 			VkRect2D scissor = vks::initializers::rect2D(width, height, 0, 0);
 			vkCmdSetScissor(cmdBuffer, 0, 1, &scissor);
 
-			vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentBuffer].scene, 0, nullptr);
-			scenes[0].bindBuffers(cmdBuffer);
-
+			vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayouts.scene, 0, 1, &descriptorSets[currentBuffer].scene, 0, nullptr);
 			vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.scene);
-
+			
 			scenes[0].bindBuffers(cmdBuffer);
-
 			scenes[0].draw(cmdBuffer);
 
-
+			drawUI(cmdBuffer);
+			
 			vkCmdEndRendering(cmdBuffer);
-		}
-			//drawUI(cmdBuffer);
 
-		vks::tools::insertImageMemoryBarrier2(cmdBuffer, swapChain.images[currentImageIndex],
-			VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, 0,
-			VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-			VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
-			{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 });
+			vks::tools::insertImageMemoryBarrier2(cmdBuffer, swapChain.images[currentImageIndex],
+				VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, 0,
+				VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+				VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
+				{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 });
+		}
 
 		VK_CHECK_RESULT(vkEndCommandBuffer(cmdBuffer));
 	}
