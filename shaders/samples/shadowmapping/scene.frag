@@ -10,6 +10,8 @@ layout (binding = 1) uniform sampler2D shadowMap;
 
 layout (location = 0) out vec4 outFragColor;
 
+#define AMBIENT 0.1
+
 float shadowCalculation(vec4 lightSpaceCoord)
 {
 	float shadow = 1.0;
@@ -20,7 +22,7 @@ float shadowCalculation(vec4 lightSpaceCoord)
 	if ( shadowCoord.z > 0.0 && shadowCoord.z < 1.0 ) 
 	{
 		float closeDepth = texture(shadowMap, shadowCoord.xy).r;
-		shadow = closeDepth < shadowCoord.z ? 0.0 : 1.0;
+		shadow = closeDepth < shadowCoord.z ? AMBIENT : 1.0;
 	}
 
 	return shadow;
@@ -33,7 +35,7 @@ void main()
 	vec3 N = normalize(inNormal);
 	vec3 L = normalize(inLightPos.xyz - inPos);
 
-	vec3 diffuse = max(dot(N, L), 0.1) * inColor;
+	vec3 diffuse = max(dot(N, L), AMBIENT) * inColor;
 
 	outFragColor = vec4(diffuse * shadow, 1.0);
 }

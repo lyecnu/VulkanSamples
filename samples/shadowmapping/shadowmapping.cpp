@@ -6,15 +6,20 @@
 class VulkanExample : public VulkanExampleBase
 {
 public:
+	bool filterPCF = true;
+
 	float depthBiasConstant = 1.25f;
 	float depthBiasSlope = 1.75f;
+
 	float zNear = 1.0f;
-	float zFar = 256.0f;
+	float zFar = 96.0f;
 
 	glm::vec3 lightPos;
 	float lightFov = 45.0f;
 
 	std::vector<vkglTF::Model> scenes;
+	int32_t sceneIndex = 0;
+	std::vector<std::string> sceneNames;
 
 	struct
 	{
@@ -36,12 +41,7 @@ public:
 	};
 	std::array<UniformBuffers, maxConcurrentFrames> uniformBuffers;
 
-	struct
-	{
-		VkDescriptorSetLayout depthMap{ VK_NULL_HANDLE };
-		VkDescriptorSetLayout scene{ VK_NULL_HANDLE };
-	} descriptorSetLayouts;
-
+	VkDescriptorSetLayout descriptorSetLayout{ VK_NULL_HANDLE };
 	struct DescriptorSets
 	{
 		VkDescriptorSet depthMap;
@@ -49,15 +49,12 @@ public:
 	};
 	std::array<DescriptorSets, maxConcurrentFrames> descriptorSets{};
 
-	struct
-	{
-		VkPipelineLayout depthMap{ VK_NULL_HANDLE };
-		VkPipelineLayout scene{ VK_NULL_HANDLE };
-	} pipelineLayouts;
+	VkPipelineLayout pipelineLayout{ VK_NULL_HANDLE };
 	struct
 	{
 		VkPipeline depthMap{ VK_NULL_HANDLE };
 		VkPipeline scene{ VK_NULL_HANDLE };
+		VkPipeline scenePCF{ VK_NULL_HANDLE };
 	} pipelines;
 
 	struct
@@ -79,6 +76,7 @@ public:
 		camera.setPosition(glm::vec3(0.0f, 0.0f, -12.5f));
 		camera.setRotation(glm::vec3(-25.0f, -390.0f, 0.0f));
 		camera.setPerspective(60.0f, (float)width / (float)height, 1.0f, 256.0f);
+		timerSpeed *= 0.5f;
 	}
 
 	~VulkanExample()
@@ -91,10 +89,9 @@ public:
 			vkFreeMemory(device, depthMapAttachment.memory, nullptr);
 			vkDestroyPipeline(device, pipelines.depthMap, nullptr);
 			vkDestroyPipeline(device, pipelines.scene, nullptr);
-			vkDestroyPipelineLayout(device, pipelineLayouts.depthMap, nullptr);
-			vkDestroyPipelineLayout(device, pipelineLayouts.scene, nullptr);
-			vkDestroyDescriptorSetLayout(device, descriptorSetLayouts.depthMap, nullptr);
-			vkDestroyDescriptorSetLayout(device, descriptorSetLayouts.scene, nullptr);
+			vkDestroyPipeline(device, pipelines.scenePCF, nullptr);
+			vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
+			vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
 			for (auto& buffer : uniformBuffers)
 			{
 				buffer.depthMap.destroy();
@@ -155,6 +152,7 @@ public:
 		scenes.resize(2);
 		scenes[0].loadFromFile(getAssetPath() + "models/vulkanscene_shadow.gltf", vulkanDevice, queue, glTFLoadingFlags);
 		scenes[1].loadFromFile(getAssetPath() + "models/samplescene.gltf", vulkanDevice, queue, glTFLoadingFlags);
+		sceneNames = { "Scene 0", "Scene 1" };
 	}
 
 	void setupDescriptors()
@@ -162,33 +160,25 @@ public:
 		// Pool
 		std::vector<VkDescriptorPoolSize> poolSizes = {
 			vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, maxConcurrentFrames * 2),
-			vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, maxConcurrentFrames)
+			vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, maxConcurrentFrames * 2)
 		};
 		VkDescriptorPoolCreateInfo descriptorPoolInfo = vks::initializers::descriptorPoolCreateInfo(poolSizes, maxConcurrentFrames * 2);
 		VK_CHECK_RESULT(vkCreateDescriptorPool(device, &descriptorPoolInfo, nullptr, &descriptorPool));
 
-		// Depth Map Pass Layout
+		// Layout
 		std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {
-			// Binding 0 : Vertex shader uniform buffer
-			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, 0),
-		};
-		VkDescriptorSetLayoutCreateInfo descriptorLayout = vks::initializers::descriptorSetLayoutCreateInfo(setLayoutBindings);
-		VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayout, nullptr, &descriptorSetLayouts.depthMap));
-
-		// Scene Pass Layout
-		setLayoutBindings = {
 			// Binding 0 : Vertex shader uniform buffer
 			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, 0),
 			// Binding 1 : shadow map sampler
 			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 1)
 		};
-		descriptorLayout = vks::initializers::descriptorSetLayoutCreateInfo(setLayoutBindings);
-		VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayout, nullptr, &descriptorSetLayouts.scene));
+		VkDescriptorSetLayoutCreateInfo descriptorLayout = vks::initializers::descriptorSetLayoutCreateInfo(setLayoutBindings);
+		VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayout, nullptr, &descriptorSetLayout));
 
 		// Sets per frame, just like the buffers themselves
+		VkDescriptorSetAllocateInfo allocInfo = vks::initializers::descriptorSetAllocateInfo(descriptorPool, &descriptorSetLayout, 1);
 		for (auto i = 0; i < uniformBuffers.size(); i++) {
 			// Depth map descriptor set
-			VkDescriptorSetAllocateInfo allocInfo = vks::initializers::descriptorSetAllocateInfo(descriptorPool, &descriptorSetLayouts.depthMap, 1);
 			VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &descriptorSets[i].depthMap));
 			std::vector<VkWriteDescriptorSet> writeDescriptorSets = {
 				// Binding 0 : Light MVP uniform buffer
@@ -197,7 +187,6 @@ public:
 			vkUpdateDescriptorSets(device, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, nullptr);
 
 			// Scene descriptor set
-			allocInfo = vks::initializers::descriptorSetAllocateInfo(descriptorPool, &descriptorSetLayouts.scene, 1);
 			VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &descriptorSets[i].scene));
 			writeDescriptorSets = {
 				// Binding 0 : Scene uniform buffer
@@ -222,7 +211,7 @@ public:
 		std::vector<VkDynamicState> dynamicStateEnables = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_LINE_WIDTH, };
 		VkPipelineDynamicStateCreateInfo dynamicState = vks::initializers::pipelineDynamicStateCreateInfo(dynamicStateEnables);
 
-		// 2. Scene rendering pipeline
+		// Scene rendering pipeline, PCF Off
 		VkPipelineRenderingCreateInfo pipelineRenderingInfo = vks::initializers::pipelineRenderingCreateInfo();
 		pipelineRenderingInfo.colorAttachmentCount = 1;
 		pipelineRenderingInfo.pColorAttachmentFormats = &swapChain.colorFormat;
@@ -234,9 +223,13 @@ public:
 			loadShader(getShadersPath() + "shadowmapping/scene.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
 			loadShader(getShadersPath() + "shadowmapping/scene.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT)
 		};
+		uint32_t enablePCF = 0;
+		VkSpecializationMapEntry filterPCFMapEntry = vks::initializers::specializationMapEntry(0, 0, sizeof(uint32_t));
+		VkSpecializationInfo filterPCFInfo = vks::initializers::specializationInfo(1, &filterPCFMapEntry, sizeof(uint32_t), &enablePCF);
+		shaderStages[1].pSpecializationInfo = &filterPCFInfo;
 
-		VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = vks::initializers::pipelineLayoutCreateInfo(&descriptorSetLayouts.scene, 1);
-		VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, nullptr, &pipelineLayouts.scene));
+		VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = vks::initializers::pipelineLayoutCreateInfo(&descriptorSetLayout, 1);
+		VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, nullptr, &pipelineLayout));
 
 		VkGraphicsPipelineCreateInfo pipelineCI = vks::initializers::pipelineCreateInfo();
 		pipelineCI.pNext = &pipelineRenderingInfo;
@@ -250,11 +243,15 @@ public:
 		pipelineCI.pDepthStencilState = &depthStencilState;
 		pipelineCI.pColorBlendState = &colorBlendState;
 		pipelineCI.pDynamicState = &dynamicState;
-		pipelineCI.layout = pipelineLayouts.scene;
+		pipelineCI.layout = pipelineLayout;
 
 		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCI, nullptr, &pipelines.scene));
 
-		// 1. Depth map pipeline
+		// Scene rendering pipeline, PCF On
+		enablePCF = 1;
+		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCI, nullptr, &pipelines.scenePCF));
+
+		// Depth map pipeline
 
 		// Rendering Info
 		pipelineRenderingInfo.colorAttachmentCount = 0;
@@ -269,10 +266,7 @@ public:
 			loadShader(getShadersPath() + "shadowmapping/depthMap.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT)
 		};
 
-		// Layout
-		pipelineLayoutCreateInfo = vks::initializers::pipelineLayoutCreateInfo(&descriptorSetLayouts.depthMap, 1);
-		VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, nullptr, &pipelineLayouts.depthMap));
-
+		rasterizationState.cullMode = VK_CULL_MODE_NONE;
 		rasterizationState.depthBiasEnable = VK_TRUE;
 		dynamicStateEnables.push_back(VK_DYNAMIC_STATE_DEPTH_BIAS);
 		dynamicState = vks::initializers::pipelineDynamicStateCreateInfo(dynamicStateEnables);
@@ -283,7 +277,6 @@ public:
 		pipelineCI.pVertexInputState = vkglTF::Vertex::getPipelineVertexInputState({ vkglTF::VertexComponent::Position });
 		pipelineCI.pRasterizationState = &rasterizationState;
 		pipelineCI.pDynamicState = &dynamicState;
-		pipelineCI.layout = pipelineLayouts.depthMap;
 
 		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCI, nullptr, &pipelines.depthMap));
 	}
@@ -374,11 +367,10 @@ public:
 
 			vkCmdSetDepthBias(cmdBuffer, depthBiasConstant, 0.0f, depthBiasSlope);
 
-			vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayouts.depthMap, 0, 1, &descriptorSets[currentBuffer].depthMap, 0, nullptr);
+			vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentBuffer].depthMap, 0, nullptr);
 			vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.depthMap);
 			
-			scenes[0].bindBuffers(cmdBuffer);
-			scenes[0].draw(cmdBuffer);
+			scenes[sceneIndex].draw(cmdBuffer);
 			
 			vkCmdEndRendering(cmdBuffer);
 
@@ -426,11 +418,10 @@ public:
 			VkRect2D scissor = vks::initializers::rect2D(width, height, 0, 0);
 			vkCmdSetScissor(cmdBuffer, 0, 1, &scissor);
 
-			vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayouts.scene, 0, 1, &descriptorSets[currentBuffer].scene, 0, nullptr);
-			vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.scene);
+			vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentBuffer].scene, 0, nullptr);
+			vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, filterPCF ? pipelines.scenePCF : pipelines.scene);
 			
-			scenes[0].bindBuffers(cmdBuffer);
-			scenes[0].draw(cmdBuffer);
+			scenes[sceneIndex].draw(cmdBuffer);
 
 			drawUI(cmdBuffer);
 			
@@ -462,6 +453,11 @@ public:
 
 	virtual void OnUpdateUIOverlay(vks::UIOverlay* overlay)
 	{
+		if (overlay->header("Settings"))
+		{
+			overlay->comboBox("Scene", &sceneIndex, sceneNames);
+			overlay->checkBox("PCF", &filterPCF);
+		}
 	}
 };
 
