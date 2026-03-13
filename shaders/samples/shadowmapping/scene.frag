@@ -8,16 +8,18 @@ layout (location = 4) in vec4 inLightSpaceCoord;
 
 layout (binding = 1) uniform sampler2D shadowMap;
 
+layout (constant_id = 0) const int filterSize = 1;
+
 layout (location = 0) out vec4 outFragColor;
 
 #define AMBIENT 0.1
 
-float shadowCalculation(vec4 lightSpaceCoord)
+float textureShadowMap(vec4 shadowCoord, vec2 offset)
 {
 	float shadow = 1.0;
 	
-	vec4 shadowCoord = lightSpaceCoord / lightSpaceCoord.w;
 	shadowCoord.xy = shadowCoord.xy * 0.5 + 0.5;
+	shadowCoord.xy += offset;
 
 	if ( shadowCoord.z > 0.0 && shadowCoord.z < 1.0 ) 
 	{
@@ -28,9 +30,33 @@ float shadowCalculation(vec4 lightSpaceCoord)
 	return shadow;
 }
 
+float filterPCF(vec4 shadowCoord, int size)
+{
+	float scale = 1;
+	
+	ivec2 texDim = textureSize(shadowMap, 0);
+	float dx = scale * 1.0 / float(texDim.x);
+	float dy = scale * 1.0 / float(texDim.y);
+
+	float shadowFactor = 0.0;
+	int count = 0;
+
+	for (int x = -size; x <= size; x++)
+	{
+		for (int y = -size; y <= size; y++)
+		{
+			shadowFactor += textureShadowMap(shadowCoord, vec2(dx*x, dy*y));
+			count++;
+		}
+	}
+
+	return shadowFactor / count;
+}
+
 void main() 
 {
-	float shadow = shadowCalculation(inLightSpaceCoord);
+	vec4 shadowCoord = inLightSpaceCoord / inLightSpaceCoord.w;
+	float shadow = filterPCF(shadowCoord, filterSize);
 
 	vec3 N = normalize(inNormal);
 	vec3 L = normalize(inLightPos.xyz - inPos);

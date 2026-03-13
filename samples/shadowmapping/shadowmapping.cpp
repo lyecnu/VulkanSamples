@@ -6,8 +6,6 @@
 class VulkanExample : public VulkanExampleBase
 {
 public:
-	bool filterPCF = true;
-
 	float depthBiasConstant = 1.25f;
 	float depthBiasSlope = 1.75f;
 
@@ -20,6 +18,12 @@ public:
 	std::vector<vkglTF::Model> scenes;
 	int32_t sceneIndex = 0;
 	std::vector<std::string> sceneNames;
+
+	struct
+	{
+		int32_t filterSize = 1;
+		int32_t enablePCSS = 0;
+	} specializationData;
 
 	struct
 	{
@@ -54,7 +58,6 @@ public:
 	{
 		VkPipeline depthMap{ VK_NULL_HANDLE };
 		VkPipeline scene{ VK_NULL_HANDLE };
-		VkPipeline scenePCF{ VK_NULL_HANDLE };
 	} pipelines;
 
 	struct
@@ -89,7 +92,6 @@ public:
 			vkFreeMemory(device, depthMapAttachment.memory, nullptr);
 			vkDestroyPipeline(device, pipelines.depthMap, nullptr);
 			vkDestroyPipeline(device, pipelines.scene, nullptr);
-			vkDestroyPipeline(device, pipelines.scenePCF, nullptr);
 			vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
 			vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
 			for (auto& buffer : uniformBuffers)
@@ -198,35 +200,98 @@ public:
 		}
 	}
 
-	void preparePipelines()
+	void prepareShadowMapPipeline()
 	{
-		// Most state is shared between all pipelines
+		VkPipelineRenderingCreateInfo pipelineRenderingInfo = vks::initializers::pipelineRenderingCreateInfo();
+		pipelineRenderingInfo.colorAttachmentCount = 0;
+		pipelineRenderingInfo.pColorAttachmentFormats = nullptr;
+		pipelineRenderingInfo.depthAttachmentFormat = depthMapFormat;
+		pipelineRenderingInfo.stencilAttachmentFormat = VK_FORMAT_UNDEFINED;
+
+		std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages =
+		{
+			loadShader(getShadersPath() + "shadowmapping/depthMap.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
+			loadShader(getShadersPath() + "shadowmapping/depthMap.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT)
+		};
+
 		VkPipelineInputAssemblyStateCreateInfo inputAssemblyState = vks::initializers::pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, VK_FALSE);
-		VkPipelineRasterizationStateCreateInfo rasterizationState = vks::initializers::pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_COUNTER_CLOCKWISE, 0);
+
+		VkPipelineViewportStateCreateInfo viewportState = vks::initializers::pipelineViewportStateCreateInfo(1, 1, 0);
+		
+		VkPipelineRasterizationStateCreateInfo rasterizationState = vks::initializers::pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_NONE, VK_FRONT_FACE_COUNTER_CLOCKWISE, 0);
+		rasterizationState.depthBiasEnable = VK_TRUE;
+
+		VkPipelineMultisampleStateCreateInfo multisampleState = vks::initializers::pipelineMultisampleStateCreateInfo(VK_SAMPLE_COUNT_1_BIT);
+		
+		VkPipelineDepthStencilStateCreateInfo depthStencilState = vks::initializers::pipelineDepthStencilStateCreateInfo(VK_TRUE, VK_TRUE, VK_COMPARE_OP_LESS_OR_EQUAL);
+
 		VkPipelineColorBlendAttachmentState blendAttachmentState = vks::initializers::pipelineColorBlendAttachmentState(0xf, VK_FALSE);
 		VkPipelineColorBlendStateCreateInfo colorBlendState = vks::initializers::pipelineColorBlendStateCreateInfo(1, &blendAttachmentState);
-		VkPipelineDepthStencilStateCreateInfo depthStencilState = vks::initializers::pipelineDepthStencilStateCreateInfo(VK_TRUE, VK_TRUE, VK_COMPARE_OP_LESS_OR_EQUAL);
-		VkPipelineViewportStateCreateInfo viewportState = vks::initializers::pipelineViewportStateCreateInfo(1, 1, 0);
-		VkPipelineMultisampleStateCreateInfo multisampleState = vks::initializers::pipelineMultisampleStateCreateInfo(VK_SAMPLE_COUNT_1_BIT);
-		std::vector<VkDynamicState> dynamicStateEnables = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_LINE_WIDTH, };
+
+		std::vector<VkDynamicState> dynamicStateEnables = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_DEPTH_BIAS };
 		VkPipelineDynamicStateCreateInfo dynamicState = vks::initializers::pipelineDynamicStateCreateInfo(dynamicStateEnables);
 
-		// Scene rendering pipeline, PCF Off
+		VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = vks::initializers::pipelineLayoutCreateInfo(&descriptorSetLayout, 1);
+		VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, nullptr, &pipelineLayout));
+
+		VkGraphicsPipelineCreateInfo pipelineCI = vks::initializers::pipelineCreateInfo();
+		pipelineCI.pNext = &pipelineRenderingInfo;
+		pipelineCI.stageCount = static_cast<uint32_t>(shaderStages.size());
+		pipelineCI.pStages = shaderStages.data();
+		pipelineCI.pVertexInputState = vkglTF::Vertex::getPipelineVertexInputState({ vkglTF::VertexComponent::Position, vkglTF::VertexComponent::Normal, vkglTF::VertexComponent::Color });
+		pipelineCI.pInputAssemblyState = &inputAssemblyState;
+		pipelineCI.pViewportState = &viewportState;
+		pipelineCI.pRasterizationState = &rasterizationState;
+		pipelineCI.pMultisampleState = &multisampleState;
+		pipelineCI.pDepthStencilState = &depthStencilState;
+		pipelineCI.pColorBlendState = &colorBlendState;
+		pipelineCI.pDynamicState = &dynamicState;
+		pipelineCI.layout = pipelineLayout;
+
+		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCI, nullptr, &pipelines.depthMap));
+	}
+
+	void prepareScenePipeline()
+	{
 		VkPipelineRenderingCreateInfo pipelineRenderingInfo = vks::initializers::pipelineRenderingCreateInfo();
 		pipelineRenderingInfo.colorAttachmentCount = 1;
 		pipelineRenderingInfo.pColorAttachmentFormats = &swapChain.colorFormat;
 		pipelineRenderingInfo.depthAttachmentFormat = depthFormat;
 		pipelineRenderingInfo.stencilAttachmentFormat = VK_FORMAT_UNDEFINED;
 
+
 		std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages =
 		{
 			loadShader(getShadersPath() + "shadowmapping/scene.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
 			loadShader(getShadersPath() + "shadowmapping/scene.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT)
 		};
-		uint32_t enablePCF = 0;
-		VkSpecializationMapEntry filterPCFMapEntry = vks::initializers::specializationMapEntry(0, 0, sizeof(uint32_t));
-		VkSpecializationInfo filterPCFInfo = vks::initializers::specializationInfo(1, &filterPCFMapEntry, sizeof(uint32_t), &enablePCF);
-		shaderStages[1].pSpecializationInfo = &filterPCFInfo;
+		std::array<VkSpecializationMapEntry, 2> specializationMapEntries = {
+			vks::initializers::specializationMapEntry(0, 0, sizeof(int32_t)),
+			vks::initializers::specializationMapEntry(1, sizeof(int32_t), sizeof(uint32_t))
+		};
+		VkSpecializationInfo specializationInfo = vks::initializers::specializationInfo(
+			static_cast<uint32_t>(specializationMapEntries.size()),
+			specializationMapEntries.data(),
+			sizeof(specializationData),
+			&specializationData
+		);
+		shaderStages[1].pSpecializationInfo = &specializationInfo;
+
+		VkPipelineInputAssemblyStateCreateInfo inputAssemblyState = vks::initializers::pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, VK_FALSE);
+
+		VkPipelineViewportStateCreateInfo viewportState = vks::initializers::pipelineViewportStateCreateInfo(1, 1, 0);
+
+		VkPipelineRasterizationStateCreateInfo rasterizationState = vks::initializers::pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_COUNTER_CLOCKWISE, 0);
+
+		VkPipelineMultisampleStateCreateInfo multisampleState = vks::initializers::pipelineMultisampleStateCreateInfo(VK_SAMPLE_COUNT_1_BIT);
+
+		VkPipelineDepthStencilStateCreateInfo depthStencilState = vks::initializers::pipelineDepthStencilStateCreateInfo(VK_TRUE, VK_TRUE, VK_COMPARE_OP_LESS_OR_EQUAL);
+
+		VkPipelineColorBlendAttachmentState blendAttachmentState = vks::initializers::pipelineColorBlendAttachmentState(0xf, VK_FALSE);
+		VkPipelineColorBlendStateCreateInfo colorBlendState = vks::initializers::pipelineColorBlendStateCreateInfo(1, &blendAttachmentState);
+
+		std::vector<VkDynamicState> dynamicStateEnables = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+		VkPipelineDynamicStateCreateInfo dynamicState = vks::initializers::pipelineDynamicStateCreateInfo(dynamicStateEnables);
 
 		VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = vks::initializers::pipelineLayoutCreateInfo(&descriptorSetLayout, 1);
 		VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, nullptr, &pipelineLayout));
@@ -246,39 +311,6 @@ public:
 		pipelineCI.layout = pipelineLayout;
 
 		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCI, nullptr, &pipelines.scene));
-
-		// Scene rendering pipeline, PCF On
-		enablePCF = 1;
-		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCI, nullptr, &pipelines.scenePCF));
-
-		// Depth map pipeline
-
-		// Rendering Info
-		pipelineRenderingInfo.colorAttachmentCount = 0;
-		pipelineRenderingInfo.pColorAttachmentFormats = nullptr;
-		pipelineRenderingInfo.depthAttachmentFormat = depthMapFormat;
-		pipelineRenderingInfo.stencilAttachmentFormat = VK_FORMAT_UNDEFINED;
-
-		// shader stages
-		shaderStages =
-		{
-			loadShader(getShadersPath() + "shadowmapping/depthMap.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
-			loadShader(getShadersPath() + "shadowmapping/depthMap.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT)
-		};
-
-		rasterizationState.cullMode = VK_CULL_MODE_NONE;
-		rasterizationState.depthBiasEnable = VK_TRUE;
-		dynamicStateEnables.push_back(VK_DYNAMIC_STATE_DEPTH_BIAS);
-		dynamicState = vks::initializers::pipelineDynamicStateCreateInfo(dynamicStateEnables);
-
-		pipelineCI.pNext = &pipelineRenderingInfo;
-		pipelineCI.stageCount = static_cast<uint32_t>(shaderStages.size());
-		pipelineCI.pStages = shaderStages.data();
-		pipelineCI.pVertexInputState = vkglTF::Vertex::getPipelineVertexInputState({ vkglTF::VertexComponent::Position });
-		pipelineCI.pRasterizationState = &rasterizationState;
-		pipelineCI.pDynamicState = &dynamicState;
-
-		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCI, nullptr, &pipelines.depthMap));
 	}
 
 	void prepareUniformBuffers()
@@ -322,7 +354,8 @@ public:
 		createShadowMap();
 		prepareUniformBuffers();
 		setupDescriptors();
-		preparePipelines();
+		prepareShadowMapPipeline();
+		prepareScenePipeline();
 		prepared = true;
 	}
 
@@ -419,7 +452,7 @@ public:
 			vkCmdSetScissor(cmdBuffer, 0, 1, &scissor);
 
 			vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentBuffer].scene, 0, nullptr);
-			vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, filterPCF ? pipelines.scenePCF : pipelines.scene);
+			vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.scene);
 			
 			scenes[sceneIndex].draw(cmdBuffer);
 
@@ -451,12 +484,31 @@ public:
 		VulkanExampleBase::submitFrame();
 	}
 
-	virtual void OnUpdateUIOverlay(vks::UIOverlay* overlay)
+    virtual void OnUpdateUIOverlay(vks::UIOverlay* overlay)
 	{
 		if (overlay->header("Settings"))
 		{
 			overlay->comboBox("Scene", &sceneIndex, sceneNames);
-			overlay->checkBox("PCF", &filterPCF);
+			if (overlay->sliderInt("PCF Filter Size", &specializationData.filterSize, 0, 5))
+			{
+				vkDeviceWaitIdle(device);
+				if (pipelines.scene != VK_NULL_HANDLE) {
+					vkDestroyPipeline(device, pipelines.scene, nullptr);
+					pipelines.scene = VK_NULL_HANDLE;
+				}
+				prepareScenePipeline();
+			}
+            bool enablePCSSUI = specializationData.enablePCSS != 0;
+			if (overlay->checkBox("PCSS", &enablePCSSUI))
+			{
+				specializationData.enablePCSS = enablePCSSUI;
+				vkDeviceWaitIdle(device);
+				if (pipelines.scene != VK_NULL_HANDLE) {
+					vkDestroyPipeline(device, pipelines.scene, nullptr);
+					pipelines.scene = VK_NULL_HANDLE;
+				}
+				prepareScenePipeline();
+			}
 		}
 	}
 };
