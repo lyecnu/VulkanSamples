@@ -6,6 +6,10 @@
 class VulkanExample : public VulkanExampleBase
 {
 public:
+	int32_t PCFFilterSize = 1;
+	bool enablePCSS = true;
+	int lightSize = 16;
+	
 	float depthBiasConstant = 1.25f;
 	float depthBiasSlope = 1.75f;
 
@@ -21,21 +25,19 @@ public:
 
 	struct
 	{
-		int32_t filterSize = 1;
-		int32_t enablePCSS = 0;
-	} specializationData;
-
-	struct
-	{
 		glm::mat4 lightSpaceMVP;
 	} depthMapData;
 
-	struct
+	struct alignas(16)
 	{
 		glm::mat4 projection;
 		glm::mat4 view;
 		glm::mat4 lightSpaceMVP;
 		glm::vec4 lightPos;
+		float zNear;
+		float zFar;
+		float lightSizeUV;
+		int32_t filterSize;
 	} sceneData;
 
 	struct UniformBuffers
@@ -57,7 +59,7 @@ public:
 	struct
 	{
 		VkPipeline depthMap{ VK_NULL_HANDLE };
-		VkPipeline scene{ VK_NULL_HANDLE };
+		VkPipeline scene[2]{ VK_NULL_HANDLE };
 	} pipelines;
 
 	struct
@@ -91,7 +93,8 @@ public:
 			vkDestroyImageView(device, depthMapAttachment.view, nullptr);
 			vkFreeMemory(device, depthMapAttachment.memory, nullptr);
 			vkDestroyPipeline(device, pipelines.depthMap, nullptr);
-			vkDestroyPipeline(device, pipelines.scene, nullptr);
+			vkDestroyPipeline(device, pipelines.scene[0], nullptr);
+			vkDestroyPipeline(device, pipelines.scene[1], nullptr);
 			vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
 			vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
 			for (auto& buffer : uniformBuffers)
@@ -170,7 +173,7 @@ public:
 		// Layout
 		std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {
 			// Binding 0 : Vertex shader uniform buffer
-			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, 0),
+			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0),
 			// Binding 1 : shadow map sampler
 			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 1)
 		};
@@ -198,6 +201,12 @@ public:
 			};
 			vkUpdateDescriptorSets(device, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, nullptr);
 		}
+	}
+
+	void preparePipelineLayout()
+	{
+		VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = vks::initializers::pipelineLayoutCreateInfo(&descriptorSetLayout, 1);
+		VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, nullptr, &pipelineLayout));
 	}
 
 	void prepareShadowMapPipeline()
@@ -231,9 +240,6 @@ public:
 		std::vector<VkDynamicState> dynamicStateEnables = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_DEPTH_BIAS };
 		VkPipelineDynamicStateCreateInfo dynamicState = vks::initializers::pipelineDynamicStateCreateInfo(dynamicStateEnables);
 
-		VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = vks::initializers::pipelineLayoutCreateInfo(&descriptorSetLayout, 1);
-		VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, nullptr, &pipelineLayout));
-
 		VkGraphicsPipelineCreateInfo pipelineCI = vks::initializers::pipelineCreateInfo();
 		pipelineCI.pNext = &pipelineRenderingInfo;
 		pipelineCI.stageCount = static_cast<uint32_t>(shaderStages.size());
@@ -265,16 +271,9 @@ public:
 			loadShader(getShadersPath() + "shadowmapping/scene.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
 			loadShader(getShadersPath() + "shadowmapping/scene.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT)
 		};
-		std::array<VkSpecializationMapEntry, 2> specializationMapEntries = {
-			vks::initializers::specializationMapEntry(0, 0, sizeof(int32_t)),
-			vks::initializers::specializationMapEntry(1, sizeof(int32_t), sizeof(uint32_t))
-		};
-		VkSpecializationInfo specializationInfo = vks::initializers::specializationInfo(
-			static_cast<uint32_t>(specializationMapEntries.size()),
-			specializationMapEntries.data(),
-			sizeof(specializationData),
-			&specializationData
-		);
+		uint32_t enablePCSSConst = 0;
+		VkSpecializationMapEntry specializationMapEntries = vks::initializers::specializationMapEntry(0, 0, sizeof(uint32_t));
+		VkSpecializationInfo specializationInfo = vks::initializers::specializationInfo(1, &specializationMapEntries, sizeof(uint32_t), &enablePCSSConst);
 		shaderStages[1].pSpecializationInfo = &specializationInfo;
 
 		VkPipelineInputAssemblyStateCreateInfo inputAssemblyState = vks::initializers::pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, VK_FALSE);
@@ -293,9 +292,6 @@ public:
 		std::vector<VkDynamicState> dynamicStateEnables = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
 		VkPipelineDynamicStateCreateInfo dynamicState = vks::initializers::pipelineDynamicStateCreateInfo(dynamicStateEnables);
 
-		VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = vks::initializers::pipelineLayoutCreateInfo(&descriptorSetLayout, 1);
-		VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, nullptr, &pipelineLayout));
-
 		VkGraphicsPipelineCreateInfo pipelineCI = vks::initializers::pipelineCreateInfo();
 		pipelineCI.pNext = &pipelineRenderingInfo;
 		pipelineCI.stageCount = static_cast<uint32_t>(shaderStages.size());
@@ -310,7 +306,10 @@ public:
 		pipelineCI.pDynamicState = &dynamicState;
 		pipelineCI.layout = pipelineLayout;
 
-		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCI, nullptr, &pipelines.scene));
+		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCI, nullptr, &pipelines.scene[0]));
+
+		enablePCSSConst = 1;
+		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCI, nullptr, &pipelines.scene[1]));
 	}
 
 	void prepareUniformBuffers()
@@ -344,6 +343,10 @@ public:
 		sceneData.view = camera.matrices.view;
 		sceneData.lightSpaceMVP = depthMapData.lightSpaceMVP;
 		sceneData.lightPos = glm::vec4(lightPos, 1.0f);
+		sceneData.zNear = zNear;
+		sceneData.zFar = zFar;
+		sceneData.lightSizeUV = lightSize / (2.0f * zNear * tan(glm::radians(lightFov) / 2.0f));
+		sceneData.filterSize = PCFFilterSize;
 		memcpy(uniformBuffers[currentBuffer].scene.mapped, &sceneData, sizeof(sceneData));
 	}
 
@@ -354,6 +357,7 @@ public:
 		createShadowMap();
 		prepareUniformBuffers();
 		setupDescriptors();
+		preparePipelineLayout();
 		prepareShadowMapPipeline();
 		prepareScenePipeline();
 		prepared = true;
@@ -452,7 +456,7 @@ public:
 			vkCmdSetScissor(cmdBuffer, 0, 1, &scissor);
 
 			vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentBuffer].scene, 0, nullptr);
-			vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.scene);
+			vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.scene[enablePCSS ? 1 : 0]);
 			
 			scenes[sceneIndex].draw(cmdBuffer);
 
@@ -489,25 +493,14 @@ public:
 		if (overlay->header("Settings"))
 		{
 			overlay->comboBox("Scene", &sceneIndex, sceneNames);
-			if (overlay->sliderInt("PCF Filter Size", &specializationData.filterSize, 0, 5))
+			overlay->checkBox("PCSS", &enablePCSS);
+			if (enablePCSS)
 			{
-				vkDeviceWaitIdle(device);
-				if (pipelines.scene != VK_NULL_HANDLE) {
-					vkDestroyPipeline(device, pipelines.scene, nullptr);
-					pipelines.scene = VK_NULL_HANDLE;
-				}
-				prepareScenePipeline();
+				overlay->sliderInt("Light Size", &lightSize, 1, 100);
 			}
-            bool enablePCSSUI = specializationData.enablePCSS != 0;
-			if (overlay->checkBox("PCSS", &enablePCSSUI))
+			else
 			{
-				specializationData.enablePCSS = enablePCSSUI;
-				vkDeviceWaitIdle(device);
-				if (pipelines.scene != VK_NULL_HANDLE) {
-					vkDestroyPipeline(device, pipelines.scene, nullptr);
-					pipelines.scene = VK_NULL_HANDLE;
-				}
-				prepareScenePipeline();
+				overlay->sliderInt("PCF Filter Size", &PCFFilterSize, 0, 10);
 			}
 		}
 	}
