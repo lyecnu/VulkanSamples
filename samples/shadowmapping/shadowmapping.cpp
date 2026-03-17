@@ -500,7 +500,7 @@ public:
 			}
 			else
 			{
-				overlay->sliderInt("PCF Filter Size", &PCFFilterSize, 0, 10);
+				overlay->sliderInt("PCF Filter Size", &PCFFilterSize, 0, 5);
 			}
 		}
 	}

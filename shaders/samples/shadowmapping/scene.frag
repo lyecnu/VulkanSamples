@@ -76,7 +76,7 @@ float calculateBlockerDepth(vec4 shadowCoord, float dx, float dy)
 			float sampleDepth = sampleShadowMapDepth(shadowCoord, vec2(dx*x, dy*y));
 			if (sampleDepth < shadowCoord.z) 
 			{
-				avgDepth += sampleDepth;
+				avgDepth += linearDepth(sampleDepth);
 				blockerCount++;
 			}
 		}
@@ -100,8 +100,8 @@ void main()
 
 		if (blockerAvgDepth > 0.0)
 		{
-			float receiverDepth =linearDepth(shadowCoord.z);
-			float blockerDepth = linearDepth(blockerAvgDepth);
+			float receiverDepth = linearDepth(shadowCoord.z);
+			float blockerDepth = blockerAvgDepth;
 
 			float penumbra = ubo.lightSizeUV * (receiverDepth - blockerDepth) /  blockerDepth;
 
