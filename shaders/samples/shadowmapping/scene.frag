@@ -67,7 +67,7 @@ float calculateBlockerDepth(vec4 shadowCoord, float dx, float dy)
 	float receiverDepth = linearDepth(shadowCoord.z);
 	float blockerSize = ubo.lightSizeUV * (1  - ubo.zNear / receiverDepth);
 
-	int searchRange = int(clamp(ceil(blockerSize / (2.0f * max(dx, dy))), 1, 10));
+	int searchRange = int(clamp(ceil(blockerSize / (2.0f * max(dx, dy))), 1, 40));
 
 	for (int x = -searchRange; x <= searchRange; x++)
 	{
@@ -105,7 +105,7 @@ void main()
 
 			float penumbra = ubo.lightSizeUV * (receiverDepth - blockerDepth) /  blockerDepth;
 
-			int pcssFilterSize = int(clamp(ceil(penumbra / (2.0f * max(dx, dy))), 1, 10));
+			int pcssFilterSize = int(clamp(ceil(penumbra / (2.0f * max(dx, dy))), 1, 40));
 
 			shadow = filterPCF(shadowCoord, pcssFilterSize, dx, dy);
 		}

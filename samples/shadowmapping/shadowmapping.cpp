@@ -10,8 +10,8 @@ public:
 	bool enablePCSS = true;
 	int lightSize = 16;
 	
-	float depthBiasConstant = 1.25f;
-	float depthBiasSlope = 1.75f;
+	float depthBiasConstant = 4.0f;
+	float depthBiasSlope = 3.0f;
 
 	float zNear = 1.0f;
 	float zFar = 96.0f;
@@ -265,12 +265,19 @@ public:
 		pipelineRenderingInfo.depthAttachmentFormat = depthFormat;
 		pipelineRenderingInfo.stencilAttachmentFormat = VK_FORMAT_UNDEFINED;
 
-
+#ifdef _DEBUG
+		std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages =
+		{
+			loadShader(getShadersPath() + "shadowmapping/scene_debug.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
+			loadShader(getShadersPath() + "shadowmapping/scene_debug.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT)
+		};
+#else
 		std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages =
 		{
 			loadShader(getShadersPath() + "shadowmapping/scene.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
 			loadShader(getShadersPath() + "shadowmapping/scene.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT)
 		};
+#endif
 		uint32_t enablePCSSConst = 0;
 		VkSpecializationMapEntry specializationMapEntries = vks::initializers::specializationMapEntry(0, 0, sizeof(uint32_t));
 		VkSpecializationInfo specializationInfo = vks::initializers::specializationInfo(1, &specializationMapEntries, sizeof(uint32_t), &enablePCSSConst);
@@ -496,7 +503,7 @@ public:
 			overlay->checkBox("PCSS", &enablePCSS);
 			if (enablePCSS)
 			{
-				overlay->sliderInt("Light Size", &lightSize, 1, 100);
+				overlay->sliderInt("Light Size", &lightSize, 1, 200);
 			}
 			else
 			{
