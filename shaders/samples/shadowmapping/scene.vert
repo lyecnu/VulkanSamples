@@ -9,9 +9,6 @@ layout (binding = 0) uniform UBO
 	mat4 projection;
 	mat4 view;
 	mat4 lightSpaceMVP;
-	vec4 lightPos;
-	int filterSize;
-	int lightSize;
 } ubo;
 
 layout (location = 0) out vec3 outPos;

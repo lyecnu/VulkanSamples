@@ -8,7 +8,7 @@ class VulkanExample : public VulkanExampleBase
 public:
 	int32_t PCFFilterSize = 1;
 	bool enablePCSS = true;
-	int lightSize = 16;
+	float lightSize = 100.0f;
 	
 	float depthBiasConstant = 4.0f;
 	float depthBiasSlope = 3.0f;
@@ -36,7 +36,7 @@ public:
 		glm::vec4 lightPos;
 		float zNear;
 		float zFar;
-		float lightSizeUV;
+		float lightSize;  // light size in shadow map UV space [0,1]
 		int32_t filterSize;
 	} sceneData;
 
@@ -350,9 +350,9 @@ public:
 		sceneData.view = camera.matrices.view;
 		sceneData.lightSpaceMVP = depthMapData.lightSpaceMVP;
 		sceneData.lightPos = glm::vec4(lightPos, 1.0f);
+		sceneData.lightSize = lightSize / SHADOW_MAP_SIZE;
 		sceneData.zNear = zNear;
 		sceneData.zFar = zFar;
-		sceneData.lightSizeUV = lightSize / (2.0f * zNear * tan(glm::radians(lightFov) / 2.0f));
 		sceneData.filterSize = PCFFilterSize;
 		memcpy(uniformBuffers[currentBuffer].scene.mapped, &sceneData, sizeof(sceneData));
 	}
@@ -503,11 +503,12 @@ public:
 			overlay->checkBox("PCSS", &enablePCSS);
 			if (enablePCSS)
 			{
-				overlay->sliderInt("Light Size", &lightSize, 1, 200);
+				ImGui::InputFloat("Light Size", &lightSize, 10.0f, 50.0f, "%.1f");
+				lightSize = std::clamp(lightSize, 0.0f, 300.0f);
 			}
 			else
 			{
-				overlay->sliderInt("PCF Filter Size", &PCFFilterSize, 0, 5);
+				overlay->sliderInt("PCF Filter Size", &PCFFilterSize, 0, 10);
 			}
 		}
 	}
