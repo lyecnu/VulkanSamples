@@ -1,14 +1,13 @@
 #include "vulkanexamplebase.h"
 #include "VulkanglTFModel.h"
 
-#define SHADOW_MAP_SIZE 2048
-
 struct Material
 {
 	struct
 	{
-		float roughness;
-		float metallic;
+		float roughness = 0.0f;
+		float metallic = 0.0f;
+		float specular = 0.0f;
 		float r, g, b;
 	} params;
 	std::string name;
@@ -20,6 +19,16 @@ struct Material
 class VulkanExample : public VulkanExampleBase
 {
 public:
+	bool displaySkybox = true;
+
+	struct Textures {
+		vks::TextureCubeMap environmentCube;
+		// Generated at runtime
+		vks::Texture2D lutBrdf;
+		vks::TextureCubeMap irradianceCube;
+		vks::TextureCubeMap prefilteredCube;
+	} textures{};
+
 	struct
 	{
 		std::vector<vkglTF::Model> objects;
@@ -105,12 +114,17 @@ public:
 
 	void loadAssets()
 	{
+		uint32_t glTFLoadingFlags = vkglTF::FileLoadingFlags::PreTransformVertices | vkglTF::FileLoadingFlags::FlipY;
+		// Skybox
+		models.skybox.loadFromFile(getAssetPath() + "models/cube.gltf", vulkanDevice, queue, glTFLoadingFlags);
+		// Objects
 		std::vector<std::string> filenames = { "sphere.gltf", "teapot.gltf", "torusknot.gltf", "venus.gltf" };
 		models.objects.resize(filenames.size());
-		for (size_t i = 0; i < filenames.size(); i++)
-		{
-			models.objects[i].loadFromFile(getAssetPath() + filenames[i], vulkanDevice, queue, vkglTF::FileLoadingFlags::PreTransformVertices | vkglTF::FileLoadingFlags::FlipY);
+		for (size_t i = 0; i < filenames.size(); i++) {
+			models.objects[i].loadFromFile(getAssetPath() + "models/" + filenames[i], vulkanDevice, queue, glTFLoadingFlags);
 		}
+		// HDR cubemap
+		textures.environmentCube.loadFromFile(getAssetPath() + "textures/hdr/pisa_cube.ktx", VK_FORMAT_R16G16B16A16_SFLOAT, vulkanDevice, queue);
 	}
 
 	void setupDescriptors()
@@ -258,60 +272,76 @@ public:
 
 	void buildCommandBuffer()
 	{
-		//VkCommandBuffer cmdBuffer = drawCmdBuffers[currentBuffer];
+		VkCommandBuffer cmdBuffer = drawCmdBuffers[currentBuffer];
 
-		//VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
+		VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
 
-		//VK_CHECK_RESULT(vkBeginCommandBuffer(cmdBuffer, &cmdBufInfo));
+		VK_CHECK_RESULT(vkBeginCommandBuffer(cmdBuffer, &cmdBufInfo));
 
-		///*
-		//	First pass: Generate shadow map by rendering the scene from light's POV
-		//*/
-		//{
-		//	vks::tools::insertImageMemoryBarrier2(cmdBuffer, depthMapAttachment.image,
-		//		0, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-		//		VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-		//		VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
-		//		{ VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1 });
+		vks::tools::insertImageMemoryBarrier2(cmdBuffer, swapChain.images[currentImageIndex],
+			0, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+			VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+			VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+			{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 });
 
-		//	VkRenderingAttachmentInfo depthStencilAttachment = vks::initializers::renderingAttachmentInfo();
-		//	depthStencilAttachment.imageView = depthMapAttachment.view;
-		//	depthStencilAttachment.imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL;
-		//	depthStencilAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-		//	depthStencilAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-		//	depthStencilAttachment.clearValue = { 1.0f, 0 };
+		VkRenderingAttachmentInfo colorAttachment = vks::initializers::renderingAttachmentInfo();
+		colorAttachment.imageView = swapChain.imageViews[currentImageIndex];
+		colorAttachment.imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL;
+		colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+		colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+		colorAttachment.clearValue.color = defaultClearColor;
 
-		//	VkRenderingInfo renderingInfo = vks::initializers::renderingInfo();
-		//	renderingInfo.renderArea.extent = { depthMapAttachment.width, depthMapAttachment.height };
-		//	renderingInfo.layerCount = 1;
-		//	renderingInfo.colorAttachmentCount = 0;
-		//	renderingInfo.pColorAttachments = nullptr;
-		//	renderingInfo.pDepthAttachment = &depthStencilAttachment;
+		VkRenderingAttachmentInfo depthStencilAttachment = vks::initializers::renderingAttachmentInfo();
+		depthStencilAttachment.imageView = depthStencil.view;
+		depthStencilAttachment.imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL;
+		depthStencilAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+		depthStencilAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+		depthStencilAttachment.clearValue = { 1.0f, 0 };
 
-		//	vkCmdBeginRendering(cmdBuffer, &renderingInfo);
+		VkRenderingInfo renderingInfo = vks::initializers::renderingInfo();
+		renderingInfo.renderArea.extent = { width, height };
+		renderingInfo.layerCount = 1;
+		renderingInfo.colorAttachmentCount = 1;
+		renderingInfo.pColorAttachments = &colorAttachment;
+		renderingInfo.pDepthAttachment = &depthStencilAttachment;
 
-		//	VkViewport viewport = vks::initializers::viewport((float)depthMapAttachment.width, (float)depthMapAttachment.height, 0.0f, 1.0f);
-		//	vkCmdSetViewport(cmdBuffer, 0, 1, &viewport);
-		//	VkRect2D scissor = vks::initializers::rect2D(depthMapAttachment.width, depthMapAttachment.height, 0, 0);
-		//	vkCmdSetScissor(cmdBuffer, 0, 1, &scissor);
+		vkCmdBeginRendering(cmdBuffer, &renderingInfo);
 
-		//	vkCmdSetDepthBias(cmdBuffer, depthBiasConstant, 0.0f, depthBiasSlope);
+		VkViewport viewport = vks::initializers::viewport((float)width, (float)height, 0.0f, 1.0f);
+		vkCmdSetViewport(cmdBuffer, 0, 1, &viewport);
+		VkRect2D scissor = vks::initializers::rect2D(width, height, 0, 0);
+		vkCmdSetScissor(cmdBuffer, 0, 1, &scissor);
 
-		//	vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentBuffer].depthMap, 0, nullptr);
-		//	vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.depthMap);
+		vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+		vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentBuffer], 0, nullptr);
+		
+		Material mat = materials[materialIndex];
+		const uint32_t gridSize = 7;
 
-		//	scenes[sceneIndex].draw(cmdBuffer);
+		// Render a 2D grid of objects with varying PBR parameters
+		for (uint32_t y = 0; y < gridSize; y++) {
+			for (uint32_t x = 0; x < gridSize; x++) {
+				glm::vec3 pos = glm::vec3(float(x - (gridSize / 2.0f)) * 2.5f, 0.0f, float(y - (gridSize / 2.0f)) * 2.5f);
+				vkCmdPushConstants(cmdBuffer, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::vec3), &pos);
+				// Vary metallic and roughness, two important PBR parameters
+				mat.params.metallic = glm::clamp((float)x / (float)(gridSize - 1), 0.1f, 1.0f);
+				mat.params.roughness = glm::clamp((float)y / (float)(gridSize - 1), 0.05f, 1.0f);
+				vkCmdPushConstants(cmdBuffer, pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(glm::vec3), sizeof(Material::params), &mat);
+				models.objects[models.objectIndex].draw(cmdBuffer);
+			}
+		}
 
-		//	vkCmdEndRendering(cmdBuffer);
+		drawUI(cmdBuffer);
 
-		//	vks::tools::insertImageMemoryBarrier2(cmdBuffer, depthMapAttachment.image,
-		//		VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
-		//		VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL,
-		//		VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-		//		{ VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1 });
-		//}
+		vkCmdEndRendering(cmdBuffer);
 
-		//VK_CHECK_RESULT(vkEndCommandBuffer(cmdBuffer));
+		vks::tools::insertImageMemoryBarrier2(cmdBuffer, swapChain.images[currentImageIndex],
+			VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, 0,
+			VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+			VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
+			{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 });
+
+		vkEndCommandBuffer(cmdBuffer);
 	}
 
 	virtual void render()
@@ -327,10 +357,12 @@ public:
 
 	virtual void OnUpdateUIOverlay(vks::UIOverlay* overlay)
 	{
-		if (overlay->header("Settings"))
-		{
+		if (overlay->header("Settings")) {
 			overlay->comboBox("Material", &materialIndex, materialNames);
 			overlay->comboBox("Object type", &models.objectIndex, objectNames);
+			overlay->inputFloat("Exposure", &uniformDataParams.exposure, 0.1f, 2);
+			overlay->inputFloat("Gamma", &uniformDataParams.gamma, 0.1f, 2);
+			overlay->checkBox("Skybox", &displaySkybox);
 		}
 	}
 };
