@@ -1,21 +1,6 @@
 #include "vulkanexamplebase.h"
 #include "VulkanglTFModel.h"
 
-struct Material
-{
-	struct
-	{
-		float roughness = 0.0f;
-		float metallic = 0.0f;
-		float specular = 0.0f;
-		float r, g, b;
-	} params;
-	std::string name;
-	Material() {};
-	Material(std::string n, glm::vec3 color, float r, float m) :
-		name(n), params{r, m, color.r, color.g, color.b } {}
-};
-
 class VulkanExample : public VulkanExampleBase
 {
 public:
@@ -49,7 +34,7 @@ public:
 		glm::mat4 view;
 		glm::mat4 model;
 		glm::vec3 cameraPos;
-	} unifomrMatrices;
+	} uniformMatrices;
 	struct
 	{
 		glm::vec4 lights[4];
@@ -573,7 +558,7 @@ public:
 			vkUpdateDescriptorSets(device, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, nullptr);
 
 			VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &descriptorSets[i].scene));
-			std::vector<VkWriteDescriptorSet> writeDescriptorSets = {
+			writeDescriptorSets = {
 				vks::initializers::writeDescriptorSet(descriptorSets[i].skybox, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &uniformBuffers[i].scene.descriptor),
 				vks::initializers::writeDescriptorSet(descriptorSets[i].skybox, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, &uniformBuffers[i].params.descriptor),
 				vks::initializers::writeDescriptorSet(descriptorSets[i].skybox, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2, &textures.irradianceCube.descriptor)
@@ -637,7 +622,7 @@ public:
 		shaderStages[1] = loadShader(getShadersPath() + "ibl/ibl_debug.frag.spv", VK_SHADER_STAGE_VERTEX_BIT);
 #else
 		shaderStages[0] = loadShader(getShadersPath() + "ibl/ibl.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
-		shaderStages[1] = loadShader(getShadersPath() + "ibl/ibl.frag.spv", VK_SHADER_STAGE_VERTEX_BIT);
+		shaderStages[1] = loadShader(getShadersPath() + "ibl/ibl.frag.spv", VK_SHADER_STAGE_FR_BIT);
 #endif
 		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCI, nullptr, &pipelines.scene));
 

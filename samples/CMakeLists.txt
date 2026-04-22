@@ -115,7 +115,7 @@ set(EXAMPLES_BASE
 
 set(EXAMPLES_GAMES202
 	shadowmapping
-	ibl
+	PBR
 )
 
 # Reserved: add more groups later, e.g. GAMES106
