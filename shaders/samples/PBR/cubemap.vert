@@ -1,9 +1,15 @@
 #version 450
 
-layout (location = 0) out vec2 outUV;
+layout (location = 0) in vec3 inPos;
+
+push_constant uniform PushConsts {
+	layout (offset = 0) mat4 mvp;
+} pushConsts;
+
+layout (location = 0) out vec3 outUVW;
 
 void main()
 {
-	outUV = vec2((gl_VertexIndex << 1) & 2, gl_VertexIndex & 2);
-	gl_Position = vec4(outUV * 2.0f - 1.0f, 0.0f, 1.0f);
+	outUVW = inPos;
+	gl_Position = pushConsts.mvp * vec4(inPos, 1.0f);
 }
