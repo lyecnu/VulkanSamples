@@ -27,6 +27,7 @@ public:
 	{
 		vks::Buffer scene;
 		vks::Buffer skybox;
+		vks::Buffer irradianceSHCoeffs;
 	};
 	std::array<UniformBuffers, maxConcurrentFrames> uniformBuffers;
 
@@ -36,18 +37,30 @@ public:
 		glm::mat4 view;
 		glm::mat4 model;
 		glm::vec3 cameraPos;
-	} uniformMatrices;
+	} transformUniforms;
+
+	struct
+	{
+		glm::vec4 lights[4];
+    	float exposure = 4.5f;
+    	float gamma = 2.2f;
+	} renderParamsUniforms;
+
+	struct
+	{
+		glm::vec3 shCoeffs[9];
+	} irradianceSHUniforms;
 
 	glm::vec3 irradianceSHCoeffs[9];
 
 	struct
 	{
 		vks::Buffer buffer;
-		VkDescriptorPool descriptorPool;
-		VkDescriptorSetLayout descriptorSetLayout;
-		VkDescriptorSet descriptorSet;
-		VkPipelineLayout pipelineLayout;
-		VkPipeline pipeline;
+		VkDescriptorPool descriptorPool{ VK_NULL_HANDLE };
+		VkDescriptorSetLayout descriptorSetLayout{ VK_NULL_HANDLE };
+		VkDescriptorSet descriptorSet{ VK_NULL_HANDLE };
+		VkPipelineLayout pipelineLayout{ VK_NULL_HANDLE };
+		VkPipeline pipeline{ VK_NULL_HANDLE };
 	} irradianceSHCompute;
 
 	VkPipelineLayout pipelineLayout{ VK_NULL_HANDLE };
@@ -88,6 +101,7 @@ public:
 			{
 				buffer.scene.destroy();
 				buffer.skybox.destroy();
+				buffer.irradianceSHCoeffs.destroy();
 			}
 			textures.environmentCube.destroy();
 		}
@@ -137,6 +151,9 @@ public:
 		VkDescriptorSetLayoutCreateInfo descriptorLayout = vks::initializers::descriptorSetLayoutCreateInfo(setLayoutBindings);
 		VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayout, nullptr, &irradianceSHCompute.descriptorSetLayout));
 
+		VkDescriptorSetAllocateInfo allocInfo = vks::initializers::descriptorSetAllocateInfo(irradianceSHCompute.descriptorPool, &irradianceSHCompute.descriptorSetLayout, 1);
+		VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &irradianceSHCompute.descriptorSet));
+
 		VkPipelineLayoutCreateInfo pipelineLayoutInfo = vks::initializers::pipelineLayoutCreateInfo(&irradianceSHCompute.descriptorSetLayout);
 		VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &irradianceSHCompute.pipelineLayout));
 
@@ -165,9 +182,9 @@ public:
 		VkBufferCopy copyRegion = {};
 		copyRegion.size = sizeof(irradianceSHCoeffs);
 		vkCmdCopyBuffer(copyCmd, irradianceSHCompute.buffer.buffer, staging.buffer, 1, &copyRegion);
-		vulkanDevice->flushCommandBuffer(cmdBuffer, queue);
+		vulkanDevice->flushCommandBuffer(copyCmd, queue);
 
-		memcpy(irradianceSHCoeffs, staging.buffer, sizeof(irradianceSHCoeffs));
+		memcpy(irradianceSHCoeffs, staging.mapped, sizeof(irradianceSHCoeffs));
 		staging.destroy();
 
 		auto tEnd = std::chrono::high_resolution_clock::now();
@@ -348,6 +365,7 @@ public:
 			VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &descriptorSets[i].scene));
 			std::vector<VkWriteDescriptorSet> writeDescriptorSets = {
 				vks::initializers::writeDescriptorSet(descriptorSets[i].scene, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &uniformBuffers[i].scene.descriptor),
+				vks::initializers::writeDescriptorSet(descriptorSets[i].scene, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2, &uniformBuffers[i].irradianceSHCoeffs.descriptor)
 			};
 			vkUpdateDescriptorSets(device, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, nullptr);
 			// Skybox
@@ -433,6 +451,8 @@ public:
 			VK_CHECK_RESULT(buffer.scene.map());
 			VK_CHECK_RESULT(vulkanDevice->createBuffer(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &buffer.skybox, sizeof(uniformMatrices)));
 			VK_CHECK_RESULT(buffer.skybox.map());
+			VK_CHECK_RESULT(vulkanDevice->createBuffer(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &buffer.irradianceSHCoeffs, sizeof(irradianceSHCoeffs)));
+			VK_CHECK_RESULT(buffer.irradianceSHCoeffs.map());
 		}
 	}
 
@@ -447,6 +467,8 @@ public:
 		// skybox
 		uniformMatrices.view = glm::mat4(glm::mat3(camera.matrices.view));
 		memcpy(uniformBuffers[currentBuffer].skybox.mapped, &uniformMatrices, sizeof(uniformMatrices));
+		// Irradiance SH
+		memcpy(uniformBuffers[currentBuffer].irradianceSHCoeffs.mapped, irradianceSHCoeffs, sizeof(irradianceSHCoeffs));
 	}
 
 	void prepare()

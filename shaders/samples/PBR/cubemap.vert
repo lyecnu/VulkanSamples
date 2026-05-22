@@ -2,7 +2,7 @@
 
 layout (location = 0) in vec3 inPos;
 
-push_constant uniform PushConsts {
+layout (push_constant) uniform PushConsts {
 	layout (offset = 0) mat4 mvp;
 } pushConsts;
 
