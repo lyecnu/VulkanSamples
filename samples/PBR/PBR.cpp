@@ -26,8 +26,8 @@ public:
 	struct UniformBuffers
 	{
 		vks::Buffer scene;
+        vks::Buffer params;
 		vks::Buffer skybox;
-		vks::Buffer irradianceSHCoeffs;
 	};
 	std::array<UniformBuffers, maxConcurrentFrames> uniformBuffers;
 
@@ -37,40 +37,38 @@ public:
 		glm::mat4 view;
 		glm::mat4 model;
 		glm::vec3 cameraPos;
-	} transformUniforms;
+	} transformData;
 
 	struct
 	{
 		glm::vec4 lights[4];
     	float exposure = 4.5f;
     	float gamma = 2.2f;
-	} renderParamsUniforms;
+	} renderParams;
+
+	vks::Buffer irradianceSHBuffer;
+	struct
+	{
+		// vec4 for alignment (vec3 would be padded to vec4 in the shader)
+		glm::vec4 shCoeffs[9];
+	} irradianceSHData;
 
 	struct
 	{
-		glm::vec3 shCoeffs[9];
-	} irradianceSHUniforms;
-
-	glm::vec3 irradianceSHCoeffs[9];
-
-	struct
-	{
-		vks::Buffer buffer;
-		VkDescriptorPool descriptorPool{ VK_NULL_HANDLE };
-		VkDescriptorSetLayout descriptorSetLayout{ VK_NULL_HANDLE };
-		VkDescriptorSet descriptorSet{ VK_NULL_HANDLE };
-		VkPipelineLayout pipelineLayout{ VK_NULL_HANDLE };
-		VkPipeline pipeline{ VK_NULL_HANDLE };
-	} irradianceSHCompute;
-
-	VkPipelineLayout pipelineLayout{ VK_NULL_HANDLE };
+		VkPipelineLayout scene{ VK_NULL_HANDLE };
+		VkPipelineLayout skybox{ VK_NULL_HANDLE };
+	} pipelineLayouts;
 	struct
 	{
 		VkPipeline scene{ VK_NULL_HANDLE };
 		VkPipeline skybox{ VK_NULL_HANDLE };
 	} pipelines;
 	
-	VkDescriptorSetLayout descriptorSetLayout{ VK_NULL_HANDLE };
+	struct
+	{
+		VkDescriptorSetLayout scene{ VK_NULL_HANDLE };
+		VkDescriptorSetLayout skybox{ VK_NULL_HANDLE };
+	} descriptorSetLayouts;
 	struct DescriptorSets
 	{
 		VkDescriptorSet scene{ VK_NULL_HANDLE };
@@ -95,15 +93,20 @@ public:
 		{
 			vkDestroyPipeline(device, pipelines.scene, nullptr);
 			vkDestroyPipeline(device, pipelines.skybox, nullptr);
-			vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
-			vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
+			vkDestroyPipelineLayout(device, pipelineLayouts.scene, nullptr);
+			vkDestroyPipelineLayout(device, pipelineLayouts.skybox, nullptr);
+			vkDestroyDescriptorSetLayout(device, descriptorSetLayouts.scene, nullptr);
+			vkDestroyDescriptorSetLayout(device, descriptorSetLayouts.skybox, nullptr);
 			for (auto& buffer : uniformBuffers)
 			{
 				buffer.scene.destroy();
+                buffer.params.destroy();
 				buffer.skybox.destroy();
-				buffer.irradianceSHCoeffs.destroy();
 			}
 			textures.environmentCube.destroy();
+			irradianceSHBuffer.destroy();
+			textures.albedoMap.destroy();
+			textures.metallicMap.destroy();
 		}
 	}
 
@@ -124,17 +127,27 @@ public:
 		// HDR Cubes
 		textures.environmentCube.loadFromFile(getAssetPath() + "textures/hdr/gcanyon_cube.ktx", VK_FORMAT_R16G16B16A16_SFLOAT, vulkanDevice, queue);
 		// PBR Textures
+		textures.albedoMap.loadFromFile(getAssetPath() + "models/cerberus/albedo.ktx", VK_FORMAT_R8G8B8A8_UNORM, vulkanDevice, queue);
+		textures.normalMap.loadFromFile(getAssetPath() + "models/cerberus/normal.ktx", VK_FORMAT_R8G8B8A8_UNORM, vulkanDevice, queue);
+		textures.metallicMap.loadFromFile(getAssetPath() + "models/cerberus/metallic.ktx", VK_FORMAT_R8_UNORM, vulkanDevice, queue);
 	}
 
 	void generateIrradianceSH()
 	{
 		auto tStart = std::chrono::high_resolution_clock::now();
 
+		vks::Buffer storageBuffer;
+		VkDescriptorPool descriptorPool;
+		VkDescriptorSetLayout descriptorSetLayout;
+		VkDescriptorSet descriptorSet;
+		VkPipelineLayout pipelineLayout;
+		VkPipeline pipeline;
+
 		VK_CHECK_RESULT(vulkanDevice->createBuffer(
 			VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
 			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-			&irradianceSHCompute.buffer,
-			sizeof(irradianceSHCoeffs) 
+			&storageBuffer,
+			sizeof(irradianceSHData) 
 		));
 
 		std::vector<VkDescriptorPoolSize> poolSizes = {
@@ -142,50 +155,56 @@ public:
 			vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1)
 		};
 		VkDescriptorPoolCreateInfo descriptorPoolInfo = vks::initializers::descriptorPoolCreateInfo(poolSizes, 1);
-		VK_CHECK_RESULT(vkCreateDescriptorPool(device, &descriptorPoolInfo, nullptr, &irradianceSHCompute.descriptorPool));
+		VK_CHECK_RESULT(vkCreateDescriptorPool(device, &descriptorPoolInfo, nullptr, &descriptorPool));
 
 		std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {
 			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_COMPUTE_BIT, 0),
 			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT, 1)
 		};
 		VkDescriptorSetLayoutCreateInfo descriptorLayout = vks::initializers::descriptorSetLayoutCreateInfo(setLayoutBindings);
-		VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayout, nullptr, &irradianceSHCompute.descriptorSetLayout));
+		VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayout, nullptr, &descriptorSetLayout));
 
-		VkDescriptorSetAllocateInfo allocInfo = vks::initializers::descriptorSetAllocateInfo(irradianceSHCompute.descriptorPool, &irradianceSHCompute.descriptorSetLayout, 1);
-		VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &irradianceSHCompute.descriptorSet));
+		VkDescriptorSetAllocateInfo allocInfo = vks::initializers::descriptorSetAllocateInfo(descriptorPool, &descriptorSetLayout, 1);
+		VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &descriptorSet));
 
-		VkPipelineLayoutCreateInfo pipelineLayoutInfo = vks::initializers::pipelineLayoutCreateInfo(&irradianceSHCompute.descriptorSetLayout);
-		VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &irradianceSHCompute.pipelineLayout));
+		VkPipelineLayoutCreateInfo pipelineLayoutInfo = vks::initializers::pipelineLayoutCreateInfo(&descriptorSetLayout);
+		VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &pipelineLayout));
 
-		VkComputePipelineCreateInfo computePipelineInfo = vks::initializers::computePipelineCreateInfo(irradianceSHCompute.pipelineLayout);
+		VkComputePipelineCreateInfo computePipelineInfo = vks::initializers::computePipelineCreateInfo(pipelineLayout);
 		computePipelineInfo.stage = loadShader(getShadersPath() + "PBR/irradianceSH.comp.spv", VK_SHADER_STAGE_COMPUTE_BIT);
-		VK_CHECK_RESULT(vkCreateComputePipelines(device, pipelineCache, 1, &computePipelineInfo, nullptr, &irradianceSHCompute.pipeline));
+		VK_CHECK_RESULT(vkCreateComputePipelines(device, pipelineCache, 1, &computePipelineInfo, nullptr, &pipeline));
 
 		std::vector<VkWriteDescriptorSet> writeDescriptorSets =
 		{
-			vks::initializers::writeDescriptorSet(irradianceSHCompute.descriptorSet, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 0, &textures.environmentCube.descriptor),
-			vks::initializers::writeDescriptorSet(irradianceSHCompute.descriptorSet, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, &irradianceSHCompute.buffer.descriptor)
+			vks::initializers::writeDescriptorSet(descriptorSet, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 0, &textures.environmentCube.descriptor),
+			vks::initializers::writeDescriptorSet(descriptorSet, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, &storageBuffer.descriptor)
 		};
-		vkUpdateDescriptorSets(device, writeDescriptorSets.size(), writeDescriptorSets.data(), 0, nullptr);
+		vkUpdateDescriptorSets(device, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, nullptr);
 
 		VkCommandBuffer cmdBuffer = vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
-		vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, irradianceSHCompute.pipeline);
-		vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, irradianceSHCompute.pipelineLayout, 0, 1, &irradianceSHCompute.descriptorSet, 0, nullptr);
+		vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
+		vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
 		vkCmdDispatch(cmdBuffer, 1, 1, 1);
 		vulkanDevice->flushCommandBuffer(cmdBuffer, queue);
 
 		vks::Buffer staging;
-		vulkanDevice->createBuffer(VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &staging, sizeof(irradianceSHCoeffs));
+		vulkanDevice->createBuffer(VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &staging, sizeof(irradianceSHData));
 		VK_CHECK_RESULT(staging.map());
 
 		VkCommandBuffer copyCmd = vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
 		VkBufferCopy copyRegion = {};
-		copyRegion.size = sizeof(irradianceSHCoeffs);
-		vkCmdCopyBuffer(copyCmd, irradianceSHCompute.buffer.buffer, staging.buffer, 1, &copyRegion);
+		copyRegion.size = sizeof(irradianceSHData);
+		vkCmdCopyBuffer(copyCmd, storageBuffer.buffer, staging.buffer, 1, &copyRegion);
 		vulkanDevice->flushCommandBuffer(copyCmd, queue);
 
-		memcpy(irradianceSHCoeffs, staging.mapped, sizeof(irradianceSHCoeffs));
+		memcpy(irradianceSHData.shCoeffs, staging.mapped, sizeof(irradianceSHData));
 		staging.destroy();
+
+		storageBuffer.destroy();
+		vkDestroyDescriptorPool(device, descriptorPool, nullptr);
+		vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
+		vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
+		vkDestroyPipeline(device, pipeline, nullptr);
 
 		auto tEnd = std::chrono::high_resolution_clock::now();
 		auto tDiff = std::chrono::duration<double, std::milli>(tEnd - tStart).count();
@@ -342,33 +361,58 @@ public:
 	{
 		// Pool
 		std::vector<VkDescriptorPoolSize> poolSizes = {
-			vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, maxConcurrentFrames * 3),
-			vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, maxConcurrentFrames),
+			vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, maxConcurrentFrames * 4),
+			vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, maxConcurrentFrames * 7),
 		};
 		VkDescriptorPoolCreateInfo descriptorPoolInfo = vks::initializers::descriptorPoolCreateInfo(poolSizes, maxConcurrentFrames * 2);
 		VK_CHECK_RESULT(vkCreateDescriptorPool(device, &descriptorPoolInfo, nullptr, &descriptorPool));
 
-		// Layout
-		std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {
+		// ==================== Scene Descriptor Set Layout ====================
+		//  binding 0: transform (vertex + fragment)
+		//  binding 1: render params (fragment)
+		//  binding 2: irradiance SH coefficients (fragment)
+		std::vector<VkDescriptorSetLayoutBinding> sceneLayoutBindings = {
 			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0),
-			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 1),
-			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT, 2)
+			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT, 1),
+			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT, 2),
+			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 3),
+			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 4),
+			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 5),
+			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 6),
+			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 7),
+			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 8),
+			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 9)
 		};
-		VkDescriptorSetLayoutCreateInfo descriptorLayout = vks::initializers::descriptorSetLayoutCreateInfo(setLayoutBindings);
-		VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayout, nullptr, &descriptorSetLayout));
+		VkDescriptorSetLayoutCreateInfo scenedescriptorLayout = vks::initializers::descriptorSetLayoutCreateInfo(sceneLayoutBindings);
+		VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &scenedescriptorLayout, nullptr, &descriptorSetLayouts.scene));
 
-		// Sets per frame, just like the buffers themselves
-		// Images do not need to be duplicated per frame, we reuse the same one for each frame
-		VkDescriptorSetAllocateInfo allocInfo = vks::initializers::descriptorSetAllocateInfo(descriptorPool, &descriptorSetLayout, 1);
-		for (auto i = 0; i < uniformBuffers.size(); i++) {
+		// ==================== Skybox Descriptor Set Layout ====================
+		//  binding 0: transform (vertex + fragment)
+		//  binding 1: environment map (fragment)
+		std::vector<VkDescriptorSetLayoutBinding> skyboxLayoutBindings = {
+			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0),
+			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 1)
+		};
+		VkDescriptorSetLayoutCreateInfo skyboxDescriptorLayout = vks::initializers::descriptorSetLayoutCreateInfo(skyboxLayoutBindings);
+		VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &skyboxDescriptorLayout, nullptr, &descriptorSetLayouts.skybox));
+
+		for (auto i = 0; i < uniformBuffers.size(); i++)
+		{
+			VkDescriptorSetAllocateInfo allocInfo = vks::initializers::descriptorSetAllocateInfo(descriptorPool, &descriptorSetLayouts.scene, 1);
 			// Scene
 			VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &descriptorSets[i].scene));
 			std::vector<VkWriteDescriptorSet> writeDescriptorSets = {
 				vks::initializers::writeDescriptorSet(descriptorSets[i].scene, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &uniformBuffers[i].scene.descriptor),
-				vks::initializers::writeDescriptorSet(descriptorSets[i].scene, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2, &uniformBuffers[i].irradianceSHCoeffs.descriptor)
+				vks::initializers::writeDescriptorSet(descriptorSets[i].scene, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, &uniformBuffers[i].params.descriptor),
+				vks::initializers::writeDescriptorSet(descriptorSets[i].scene, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2, &irradianceSHBuffer.descriptor),
+				vks::initializers::writeDescriptorSet(descriptorSets[i].scene, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 5, &textures.albedoMap.descriptor),
+				vks::initializers::writeDescriptorSet(descriptorSets[i].scene, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 6, &textures.normalMap.descriptor),
+				vks::initializers::writeDescriptorSet(descriptorSets[i].scene, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 8, &textures.metallicMap.descriptor)
 			};
 			vkUpdateDescriptorSets(device, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, nullptr);
+
 			// Skybox
+			allocInfo = vks::initializers::descriptorSetAllocateInfo(descriptorPool, &descriptorSetLayouts.skybox, 1);
 			VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &descriptorSets[i].skybox));
 			writeDescriptorSets = {
 				vks::initializers::writeDescriptorSet(descriptorSets[i].skybox, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &uniformBuffers[i].skybox.descriptor),
@@ -389,23 +433,14 @@ public:
 		std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages{};
 
 		VkPipelineInputAssemblyStateCreateInfo inputAssemblyState = vks::initializers::pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, VK_FALSE);
-
 		VkPipelineViewportStateCreateInfo viewportState = vks::initializers::pipelineViewportStateCreateInfo(1, 1, 0);
-
 		VkPipelineRasterizationStateCreateInfo rasterizationState = vks::initializers::pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_COUNTER_CLOCKWISE);
-
 		VkPipelineMultisampleStateCreateInfo multisampleState = vks::initializers::pipelineMultisampleStateCreateInfo(VK_SAMPLE_COUNT_1_BIT);
-
 		VkPipelineDepthStencilStateCreateInfo depthStencilState = vks::initializers::pipelineDepthStencilStateCreateInfo(VK_TRUE, VK_TRUE, VK_COMPARE_OP_LESS_OR_EQUAL);
-
 		VkPipelineColorBlendAttachmentState blendAttachmentState = vks::initializers::pipelineColorBlendAttachmentState(0xf, VK_FALSE);
 		VkPipelineColorBlendStateCreateInfo colorBlendState = vks::initializers::pipelineColorBlendStateCreateInfo(1, &blendAttachmentState);
-
 		std::vector<VkDynamicState> dynamicStateEnables = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
 		VkPipelineDynamicStateCreateInfo dynamicState = vks::initializers::pipelineDynamicStateCreateInfo(dynamicStateEnables);
-
-		VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = vks::initializers::pipelineLayoutCreateInfo(&descriptorSetLayout);
-		vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, nullptr, &pipelineLayout);
 
 		VkGraphicsPipelineCreateInfo pipelineCI = vks::initializers::pipelineCreateInfo();
 		pipelineCI.pNext = &pipelineRenderingInfo;
@@ -419,8 +454,12 @@ public:
 		pipelineCI.pDepthStencilState = &depthStencilState;
 		pipelineCI.pColorBlendState = &colorBlendState;
 		pipelineCI.pDynamicState = &dynamicState;
-		pipelineCI.layout = pipelineLayout;
 
+        // ==================== Scene Pipeline ====================
+		VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = vks::initializers::pipelineLayoutCreateInfo(&descriptorSetLayouts.scene);
+		VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, nullptr, &pipelineLayouts.scene));
+
+		pipelineCI.layout = pipelineLayouts.scene;
 #ifdef _DEBUG
 		shaderStages[0] = loadShader(getShadersPath() + "PBR/scene_debug.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
 		shaderStages[1] = loadShader(getShadersPath() + "PBR/scene_debug.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
@@ -430,6 +469,11 @@ public:
 #endif
 		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCI, nullptr, &pipelines.scene));
 
+		// ===================== Skybox Pipeline ====================
+		pipelineLayoutCreateInfo = vks::initializers::pipelineLayoutCreateInfo(&descriptorSetLayouts.skybox);
+		VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, nullptr, &pipelineLayouts.skybox));
+
+		pipelineCI.layout = pipelineLayouts.skybox;
 #ifdef _DEBUG
 		shaderStages[0] = loadShader(getShadersPath() + "PBR/skybox_debug.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
 		shaderStages[1] = loadShader(getShadersPath() + "PBR/skybox_debug.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
@@ -447,28 +491,30 @@ public:
 	{
 		for (auto& buffer : uniformBuffers)
 		{
-			VK_CHECK_RESULT(vulkanDevice->createBuffer(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &buffer.scene, sizeof(uniformMatrices)));
+			VK_CHECK_RESULT(vulkanDevice->createBuffer(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &buffer.scene, sizeof(transformData)));
 			VK_CHECK_RESULT(buffer.scene.map());
-			VK_CHECK_RESULT(vulkanDevice->createBuffer(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &buffer.skybox, sizeof(uniformMatrices)));
+			VK_CHECK_RESULT(vulkanDevice->createBuffer(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &buffer.params, sizeof(renderParams)));
+			VK_CHECK_RESULT(buffer.params.map());
+			VK_CHECK_RESULT(vulkanDevice->createBuffer(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &buffer.skybox, sizeof(transformData)));
 			VK_CHECK_RESULT(buffer.skybox.map());
-			VK_CHECK_RESULT(vulkanDevice->createBuffer(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &buffer.irradianceSHCoeffs, sizeof(irradianceSHCoeffs)));
-			VK_CHECK_RESULT(buffer.irradianceSHCoeffs.map());
 		}
+		VK_CHECK_RESULT(vulkanDevice->createBuffer(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &irradianceSHBuffer, sizeof(irradianceSHData)));
+		VK_CHECK_RESULT(irradianceSHBuffer.map());
+		memcpy(irradianceSHBuffer.mapped, irradianceSHData.shCoeffs, sizeof(irradianceSHData));
 	}
 
 	void updateUniformBuffers()
 	{
 		// scene
-		uniformMatrices.projection = camera.matrices.perspective;
-		uniformMatrices.view = camera.matrices.view;
-		uniformMatrices.model = glm::rotate(glm::mat4(1.0f), glm::radians(-90.0f), glm::vec3(0.0f, 1.0f, 0.0f));
-		uniformMatrices.cameraPos = -camera.position;
-		memcpy(uniformBuffers[currentBuffer].scene.mapped, &uniformMatrices, sizeof(uniformMatrices));
+		transformData.projection = camera.matrices.perspective;
+		transformData.view = camera.matrices.view;
+		transformData.model = glm::rotate(glm::mat4(1.0f), glm::radians(-90.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+		transformData.cameraPos = -camera.position;
+		memcpy(uniformBuffers[currentBuffer].scene.mapped, &transformData, sizeof(transformData));
+        memcpy(uniformBuffers[currentBuffer].params.mapped, &renderParams, sizeof(renderParams));
 		// skybox
-		uniformMatrices.view = glm::mat4(glm::mat3(camera.matrices.view));
-		memcpy(uniformBuffers[currentBuffer].skybox.mapped, &uniformMatrices, sizeof(uniformMatrices));
-		// Irradiance SH
-		memcpy(uniformBuffers[currentBuffer].irradianceSHCoeffs.mapped, irradianceSHCoeffs, sizeof(irradianceSHCoeffs));
+		transformData.view = glm::mat4(glm::mat3(camera.matrices.view));
+		memcpy(uniformBuffers[currentBuffer].skybox.mapped, &transformData, sizeof(transformData));
 	}
 
 	void prepare()
@@ -529,12 +575,12 @@ public:
 		if (displaySkybox)
 		{
 			vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.skybox);
-			vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentBuffer].skybox, 0, nullptr);
+			vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayouts.skybox, 0, 1, &descriptorSets[currentBuffer].skybox, 0, nullptr);
 			models.skybox.draw(cmdBuffer);
 		}
 
 		vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.scene);
-		vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentBuffer].scene, 0, nullptr);
+		vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayouts.scene, 0, 1, &descriptorSets[currentBuffer].scene, 0, nullptr);
 		models.object.draw(cmdBuffer);
 
 		drawUI(cmdBuffer);

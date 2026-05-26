@@ -5,7 +5,7 @@ layout (local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
 layout (binding = 0) uniform samplerCube environmentMap;
 layout (binding = 1) buffer SHCoeffs
 {
-    vec3 coeffs[9];
+    vec4 coeffs[9];
 };
 
 #define SAMPLES_PER_THREAD 256
@@ -13,7 +13,7 @@ layout (binding = 1) buffer SHCoeffs
 #define PI 3.14159265359
 #define GOLDEN_RATIO 1.618033988749895
 
-shared vec3 sharedCoeffs[9][256];
+shared vec4 sharedCoeffs[9][256];
 
 float SHbasis(int l, int m, vec3 dir) {
     float x = dir.x, y = dir.y, z = dir.z;
@@ -46,7 +46,7 @@ void main()
 
     for (int i = 0; i < 9; i++)
     {
-        sharedCoeffs[i][threadIdx] = vec3(0.0);
+        sharedCoeffs[i][threadIdx] = vec4(0.0);
     }
 
     for (uint s = 0; s < SAMPLES_PER_THREAD; s++)
@@ -54,7 +54,7 @@ void main()
         uint globalIdx = threadIdx * SAMPLES_PER_THREAD + s;
 
         // Fibonacci sphere sampling for uniform distribution
-        float cosTheta = 1.0 - (2 * float(globalIdx) + 1.0) / TOTAL_SAMPLES;
+        float cosTheta = 1.0 - (2.0 * float(globalIdx) + 1.0) / float(TOTAL_SAMPLES);
         float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
         float phi = 2.0 * PI * fract(float(globalIdx) * GOLDEN_RATIO);
 
@@ -65,32 +65,32 @@ void main()
         // Project onto SH basis functions and accumulate
         for (int i = 0; i < 9; i++)
         {
-            sharedCoeffs[i][threadIdx] += radiance * SHbasisFlat(i, dir);
+            sharedCoeffs[i][threadIdx].xyz += radiance * SHbasisFlat(i, dir);
         }
+    }
 
-        barrier();
+    barrier();
 
-        // Parallel reduction
-        for (uint stride = 128; stride > 0; stride >>= 1)
+    // Parallel reduction
+    for (uint stride = 128; stride > 0; stride >>= 1)
+    {
+        if (threadIdx < stride)
         {
-            if (threadIdx < stride)
-            {
-                for (int i = 0; i < 9; i++)
-                {
-                    sharedCoeffs[i][threadIdx] += sharedCoeffs[i][threadIdx + stride];
-                }
-            }
-            barrier();
-        }
-
-        // Final result
-        if (threadIdx == 0)
-        {
-            float weight = 4.0 * PI / float(TOTAL_SAMPLES);
             for (int i = 0; i < 9; i++)
             {
-                coeffs[i] = sharedCoeffs[i][0] * weight;
+                sharedCoeffs[i][threadIdx].xyz += sharedCoeffs[i][threadIdx + stride].xyz;
             }
+        }
+        barrier();
+    }
+
+    // Final result
+    if (threadIdx == 0)
+    {
+        float weight = 4.0 * PI / float(TOTAL_SAMPLES);
+        for (int i = 0; i < 9; i++)
+        {
+            coeffs[i] = vec4(sharedCoeffs[i][0].xyz * weight, 0.0);
         }
     }
 }
