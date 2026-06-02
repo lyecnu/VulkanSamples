@@ -106,7 +106,10 @@ public:
 			textures.environmentCube.destroy();
 			irradianceSHBuffer.destroy();
 			textures.albedoMap.destroy();
+			textures.normalMap.destroy();
+			textures.aoMap.destroy();
 			textures.metallicMap.destroy();
+			textures.roughnessMap.destroy();
 		}
 	}
 
@@ -129,7 +132,9 @@ public:
 		// PBR Textures
 		textures.albedoMap.loadFromFile(getAssetPath() + "models/cerberus/albedo.ktx", VK_FORMAT_R8G8B8A8_UNORM, vulkanDevice, queue);
 		textures.normalMap.loadFromFile(getAssetPath() + "models/cerberus/normal.ktx", VK_FORMAT_R8G8B8A8_UNORM, vulkanDevice, queue);
+		textures.aoMap.loadFromFile(getAssetPath() + "models/cerberus/ao.ktx", VK_FORMAT_R8_UNORM, vulkanDevice, queue);
 		textures.metallicMap.loadFromFile(getAssetPath() + "models/cerberus/metallic.ktx", VK_FORMAT_R8_UNORM, vulkanDevice, queue);
+		textures.roughnessMap.loadFromFile(getAssetPath() + "models/cerberus/roughness.ktx", VK_FORMAT_R8_UNORM, vulkanDevice, queue);
 	}
 
 	void generateIrradianceSH()
@@ -368,9 +373,16 @@ public:
 		VK_CHECK_RESULT(vkCreateDescriptorPool(device, &descriptorPoolInfo, nullptr, &descriptorPool));
 
 		// ==================== Scene Descriptor Set Layout ====================
-		//  binding 0: transform (vertex + fragment)
-		//  binding 1: render params (fragment)
-		//  binding 2: irradiance SH coefficients (fragment)
+		// binding 0: transform (vertex + fragment)
+		// binding 1: render params (fragment)
+		// binding 2: irradiance SH coefficients (fragment)
+        // binding 3: environment map (fragment)
+		// binding 4: prefiltered environment map (fragment)
+        // binding 5: albedo map (fragment)
+        // binding 6: normal map (fragment)
+        // binding 7: ao map (fragment)
+        // binding 8: metallic map (fragment)
+        // binding 9: roughness map (fragment)
 		std::vector<VkDescriptorSetLayoutBinding> sceneLayoutBindings = {
 			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0),
 			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT, 1),
@@ -387,11 +399,13 @@ public:
 		VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &scenedescriptorLayout, nullptr, &descriptorSetLayouts.scene));
 
 		// ==================== Skybox Descriptor Set Layout ====================
-		//  binding 0: transform (vertex + fragment)
-		//  binding 1: environment map (fragment)
+		// binding 0: transform (vertex + fragment)
+        // binding 1: render params (fragment)
+		// binding 2: environment map (fragment)
 		std::vector<VkDescriptorSetLayoutBinding> skyboxLayoutBindings = {
 			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0),
-			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 1)
+			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT, 1),
+			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 2),
 		};
 		VkDescriptorSetLayoutCreateInfo skyboxDescriptorLayout = vks::initializers::descriptorSetLayoutCreateInfo(skyboxLayoutBindings);
 		VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &skyboxDescriptorLayout, nullptr, &descriptorSetLayouts.skybox));
@@ -405,9 +419,13 @@ public:
 				vks::initializers::writeDescriptorSet(descriptorSets[i].scene, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &uniformBuffers[i].scene.descriptor),
 				vks::initializers::writeDescriptorSet(descriptorSets[i].scene, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, &uniformBuffers[i].params.descriptor),
 				vks::initializers::writeDescriptorSet(descriptorSets[i].scene, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2, &irradianceSHBuffer.descriptor),
+				vks::initializers::writeDescriptorSet(descriptorSets[i].scene, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 3, &textures.albedoMap.descriptor),
+				vks::initializers::writeDescriptorSet(descriptorSets[i].scene, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4, &textures.albedoMap.descriptor),
 				vks::initializers::writeDescriptorSet(descriptorSets[i].scene, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 5, &textures.albedoMap.descriptor),
 				vks::initializers::writeDescriptorSet(descriptorSets[i].scene, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 6, &textures.normalMap.descriptor),
-				vks::initializers::writeDescriptorSet(descriptorSets[i].scene, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 8, &textures.metallicMap.descriptor)
+				vks::initializers::writeDescriptorSet(descriptorSets[i].scene, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 7, &textures.aoMap.descriptor),
+				vks::initializers::writeDescriptorSet(descriptorSets[i].scene, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 8, &textures.metallicMap.descriptor),
+				vks::initializers::writeDescriptorSet(descriptorSets[i].scene, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 9, &textures.roughnessMap.descriptor)
 			};
 			vkUpdateDescriptorSets(device, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, nullptr);
 
@@ -416,7 +434,8 @@ public:
 			VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &descriptorSets[i].skybox));
 			writeDescriptorSets = {
 				vks::initializers::writeDescriptorSet(descriptorSets[i].skybox, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &uniformBuffers[i].skybox.descriptor),
-				vks::initializers::writeDescriptorSet(descriptorSets[i].skybox, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, &textures.environmentCube.descriptor)
+				vks::initializers::writeDescriptorSet(descriptorSets[i].skybox, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, &uniformBuffers[i].params.descriptor),
+				vks::initializers::writeDescriptorSet(descriptorSets[i].skybox, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2, &textures.environmentCube.descriptor)
 			};
 			vkUpdateDescriptorSets(device, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, nullptr);
 		}
@@ -505,16 +524,22 @@ public:
 
 	void updateUniformBuffers()
 	{
-		// scene
+		// Scene
 		transformData.projection = camera.matrices.perspective;
 		transformData.view = camera.matrices.view;
 		transformData.model = glm::rotate(glm::mat4(1.0f), glm::radians(-90.0f), glm::vec3(0.0f, 1.0f, 0.0f));
 		transformData.cameraPos = -camera.position;
 		memcpy(uniformBuffers[currentBuffer].scene.mapped, &transformData, sizeof(transformData));
-        memcpy(uniformBuffers[currentBuffer].params.mapped, &renderParams, sizeof(renderParams));
-		// skybox
+		// Skybox
 		transformData.view = glm::mat4(glm::mat3(camera.matrices.view));
 		memcpy(uniformBuffers[currentBuffer].skybox.mapped, &transformData, sizeof(transformData));
+		// Render Params
+		const float p = 15.0f;
+		renderParams.lights[0] = glm::vec4(-p, -p * 0.5f, -p, 1.0f);
+		renderParams.lights[1] = glm::vec4(-p, -p * 0.5f, p, 1.0f);
+		renderParams.lights[2] = glm::vec4(p, -p * 0.5f, p, 1.0f);
+		renderParams.lights[3] = glm::vec4(p, -p * 0.5f, -p, 1.0f);
+        memcpy(uniformBuffers[currentBuffer].params.mapped, &renderParams, sizeof(renderParams));
 	}
 
 	void prepare()
@@ -608,7 +633,10 @@ public:
 
 	virtual void OnUpdateUIOverlay(vks::UIOverlay* overlay)
 	{
-		if (overlay->header("Settings")) {
+		if (overlay->header("Settings"))
+		{
+			overlay->inputFloat("Exposure", &renderParams.exposure, 0.1f, 2.0f);
+			overlay->inputFloat("Gamma", &renderParams.gamma, 0.1f, 2.0f);
 			overlay->checkBox("Skybox", &displaySkybox);
 		}
 	}

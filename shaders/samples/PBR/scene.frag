@@ -5,6 +5,14 @@ layout (location = 1) in vec3 inNormal;
 layout (location = 2) in vec2 inUV;
 layout (location = 3) in vec4 inTangent;
 
+layout (binding = 0) uniform Transforms
+{
+	mat4 projection;
+	mat4 view;
+	mat4 model;
+	vec3 camPos;
+};
+
 layout (binding = 1) uniform Params
 {
     vec4 lights[4];
@@ -27,10 +35,6 @@ layout (location = 0) out vec4 outColor;
 
 #define PI 3.1415926535897932384626433832795
 
-#define ALBEDO pow(texture(albedoMap, inUV).rgb, vec3(2.2))
-#define NORMAL calculateNormal()
-#define METALLIC texture(metallicMap, inUV).r
-
 // From http://filmicgames.com/archives/75
 vec3 Uncharted2Tonemap(vec3 x)
 {
@@ -41,6 +45,54 @@ vec3 Uncharted2Tonemap(vec3 x)
 	float E = 0.02;
 	float F = 0.30;
 	return ((x*(A*x+C*B)+D*E)/(x*(A*x+B)+D*F))-E/F;
+}
+
+float D_GGX(float dotNH, float roughness)
+{
+    float alpha = roughness * roughness;
+    float alpha2 = alpha * alpha;
+    float denom = (dotNH * dotNH) * (alpha2 - 1.0) + 1.0;
+    return (alpha2) / (PI * denom * denom);
+}
+
+float G_SchlicksmithGGX(float dotNL, float dotNV, float roughness)
+{
+    float k = roughness * roughness / 2.0;
+    float GL = dotNL / (dotNL * (1.0 - k) + k);
+    float GV = dotNV / (dotNV * (1.0 - k) + k);
+    return GL * GV;
+}
+
+vec3 F_Schlick(float dotVH, vec3 F0)
+{
+    return F0 + (1.0 - F0) * pow(1.0 - dotVH, 5.0);
+}
+
+vec3 calculateDirectLight(vec3 L, vec3 V, vec3 N, vec3 albedo, float metallic, float roughness, vec3 F0)
+{
+    vec3 H = normalize(L + V);
+    float dotNH = clamp(dot(N, H), 0.0, 1.0);
+    float dotNL = clamp(dot(N, L), 0.0, 1.0);
+    float dotNV = clamp(dot(N, V), 0.0, 1.0);
+    float dotLH = clamp(dot(L, H), 0.0, 1.0);
+
+    vec3 Li = vec3(1.0);
+
+    vec3 Lo = vec3(0.0);
+    if (dotNL > 0.0)
+    {
+        vec3 diffuse = albedo / PI;
+
+        float D = D_GGX(dotNH, roughness);
+        float G = G_SchlicksmithGGX(dotNL, dotNV, roughness);
+        vec3 F = F_Schlick(dotLH, F0);
+        vec3 spec = D * G * F / (4.0 * dotNL * dotNV + 0.001);
+
+        vec3 kD = (1.0 - F) * (1.0 - metallic);
+        Lo += (kD * diffuse + spec) * dotNL * Li;
+    }
+
+    return Lo;
 }
 
 float SHbasis(int l, int m, vec3 dir) {
@@ -92,13 +144,40 @@ vec3 calculateNormal()
 
 void main()
 {
-    vec3 irradiance = calculateIrradiance(NORMAL);
-    vec3 diffuse = (1.0 - METALLIC) * ALBEDO / PI * irradiance;
+    vec3 N = calculateNormal();
+    vec3 V = normalize(camPos - inWorldPos);
 
-    vec3 color = diffuse; // + specular (not implemented in this snippet)
+    vec3 albedo = pow(texture(albedoMap, inUV).rgb, vec3(2.2));
+    float metallic = texture(metallicMap, inUV).r;
+    float roughness = texture(roughnessMap, inUV).r;
+    vec3 F0 = mix(vec3(0.04), albedo, metallic);
+    
+    // Direct lighting
+    vec3 Lo_direct = vec3(0.0);
+
+    for (int i = 0; i < lights.length(); i++)
+    {
+        vec3 L = normalize(lights[i].xyz - inWorldPos);
+        Lo_direct += calculateDirectLight(L, V, N, albedo, metallic, roughness, F0);
+    }
+
+    // Indirect lighting
+    vec3 irradiance = calculateIrradiance(N);
+    vec3 diffuse = albedo / PI * irradiance;
+    
+    // kD for indirect lighting
+    vec3 F = F_Schlick(max(dot(N, V), 0.0), F0);
+    vec3 kD = (1.0 - F) * (1.0 - metallic);
+
+    vec3 specular = vec3(0.0);
+
+    vec3 Lo_indirect = kD * diffuse + specular;
+
+    vec3 color = Lo_direct + Lo_indirect;
     // Tone Mapping
     color = Uncharted2Tonemap(color * exposure);
-    // gamma
+    color /= Uncharted2Tonemap(vec3(11.2f));
+    // Gamma correction
     color = pow(color, vec3(1.0 / gamma));
     outColor = vec4(color, 1.0);
 }
